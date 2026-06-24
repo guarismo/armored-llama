@@ -59,16 +59,23 @@ val jniArm64 = layout.projectDirectory.dir("src/main/jniLibs/arm64-v8a")
 val fetchLlamaServer by tasks.registering {
     description = "Download + stage the llama.cpp $llamaRelease arm64 server into jniLibs"
     val marker = jniArm64.file("libllamaserver.so").asFile
+    inputs.property("llamaRelease", llamaRelease) // re-stage when the pinned release changes
     outputs.file(marker)
     doLast {
-        if (marker.exists()) return@doLast
         val tarball = layout.buildDirectory.file("llama-dl/llama-$llamaRelease.tar.gz").get().asFile
         if (!tarball.exists()) {
             tarball.parentFile.mkdirs()
-            URI(llamaUrl).toURL().openStream().use { input: java.io.InputStream ->
+            val conn = (URI(llamaUrl).toURL().openConnection() as java.net.HttpURLConnection).apply {
+                instanceFollowRedirects = true
+                connectTimeout = 30_000
+                readTimeout = 120_000
+            }
+            conn.inputStream.use { input: java.io.InputStream ->
                 tarball.outputStream().use { out: java.io.OutputStream -> input.copyTo(out) }
             }
         }
+        // Remove any stale libs from a previous release before staging the pinned one.
+        delete(fileTree(jniArm64) { include("*.so") })
         copy {
             from(tarTree(resources.gzip(tarball)))
             into(jniArm64)
@@ -77,7 +84,9 @@ val fetchLlamaServer by tasks.registering {
             includeEmptyDirs = false
         }
         val server = jniArm64.file("llama-server").asFile
-        if (server.exists()) server.renameTo(jniArm64.file("libllamaserver.so").asFile)
+        val dest = jniArm64.file("libllamaserver.so").asFile
+        if (dest.exists()) dest.delete()
+        check(server.renameTo(dest)) { "Failed to stage libllamaserver.so from $server" }
     }
 }
 
