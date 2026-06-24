@@ -20,14 +20,14 @@ class LlamaServerService : Service() {
 
     enum class Status { STOPPED, STARTING, RUNNING, ERROR }
 
-    private var process: Process? = null
+    @Volatile private var process: Process? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> { stopServer(); stopSelfResult(startId) }
-            else -> startServer()
+            else -> startServer(startId)
         }
         return START_NOT_STICKY
     }
@@ -37,7 +37,7 @@ class LlamaServerService : Service() {
         super.onDestroy()
     }
 
-    private fun startServer() {
+    private fun startServer(startId: Int) {
         if (process != null) return
         ensureChannel()
         startForegroundCompat("Starting llama-server…")
@@ -70,7 +70,7 @@ class LlamaServerService : Service() {
             process = p
             statusFlow.value = Status.RUNNING
             startForegroundCompat("Running on ${config.host}:${config.port}")
-            Thread {
+            Thread({
                 runCatching {
                     p.inputStream.bufferedReader().forEachLine { LogBus.append(it) }
                 }
@@ -78,8 +78,8 @@ class LlamaServerService : Service() {
                 LogBus.append("server exited (code $code)")
                 process = null
                 statusFlow.value = Status.STOPPED
-                stopSelf()
-            }.apply { isDaemon = true }.start()
+                stopSelfResult(startId)
+            }, "llama-server-reader").apply { isDaemon = true }.start()
         } catch (e: Exception) {
             fail("failed to start: ${e.message}")
         }
