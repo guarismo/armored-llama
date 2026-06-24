@@ -25,5 +25,5 @@ class ConfigRepository(private val context: Context) {
     }
 
     fun modelsDir(): File = File(base(), "models").apply { mkdirs() }
-    fun logFile(): File = File(base(), "logs/server.log")
+    fun logFile(): File = File(base(), "logs/server.log").also { it.parentFile?.mkdirs() }
 }

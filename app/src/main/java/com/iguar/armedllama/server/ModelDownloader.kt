@@ -28,7 +28,7 @@ class ModelDownloader(private val modelsDir: File) {
                 val partial = conn.responseCode == HttpURLConnection.HTTP_PARTIAL
                 val len = conn.contentLengthLong.coerceAtLeast(0L)
                 val total = if (partial) existing + len else len
-                if (partial && isComplete(existing, total)) return@withContext target
+                if (partial && total > 0L && isComplete(existing, total)) return@withContext target
                 conn.inputStream.use { input ->
                     FileOutputStream(target, partial).use { out ->
                         val buf = ByteArray(1 shl 16)
