@@ -13,7 +13,12 @@
 - Package root: `com.iguar.armedllama`; new code under `com.iguar.armedllama.server`.
 - minSdk 26, targetSdk 36, AGP 9 built-in Kotlin (no `kotlin.android` plugin), `jvmTarget = JVM_11`.
 - Non-root: execute the binary from `applicationInfo.nativeLibraryDir` only. Requires `useLegacyPackaging = true` and `android:extractNativeLibs="true"`.
-- Binary slot (user-provided): `app/src/main/jniLibs/arm64-v8a/libllamaserver.so`.
+- Binary: mainline llama.cpp release **`b9775`** android-arm64
+  (`https://github.com/ggml-org/llama.cpp/releases/download/b9775/llama-b9775-bin-android-arm64.tar.gz`),
+  **dynamically linked**. Stage all release `*.so` + the `llama-server` exec renamed to
+  `app/src/main/jniLibs/arm64-v8a/libllamaserver.so`. The service must run it with
+  `LD_LIBRARY_PATH = applicationInfo.nativeLibraryDir` so deps (`libllama.so`, `libggml*.so`,
+  `libmtmd.so`, `libllama-server-impl.so`, …) resolve.
 - Model storage: `getExternalFilesDir("models")`. Config: `getExternalFilesDir(null)/config.ini`. Logs: `getExternalFilesDir("logs")/server.log`.
 - HF repo: `unsloth/gemma-4-E2B-it-qat-mobile-GGUF`; files `gemma-4-E2B-it-qat-UD-Q2_K_XL.gguf` (model), `mtp-gemma-4-E2B-it.gguf` (draft), `mmproj-F16.gguf` (mmproj).
 - Default flags verbatim: `--spec-type draft-mtp --spec-draft-n-max 4 --spec-draft-p-min 0.6 --no-mmap --host 0.0.0.0 --port 8080 -c 8192 -t 4 --tools all`.
@@ -573,16 +578,25 @@ git commit -m "feat(server): LogBus live log stream with file tee"
 
 ---
 
-### Task 6: Build config + manifest + binary slot
+### Task 6: Bundle the b9775 llama-server + build/manifest config
 
 **Files:**
-- Modify: `app/build.gradle.kts` (add `packaging { jniLibs { useLegacyPackaging = true } }`)
+- Modify: `.gitignore` (already done in pre-flight: `app/src/main/jniLibs/arm64-v8a/*.so`)
+- Modify: `app/build.gradle.kts` (packaging + `fetchLlamaServer` task wired into preBuild)
 - Modify: `app/src/main/AndroidManifest.xml`
 - Create: `app/src/main/jniLibs/arm64-v8a/README.md`
 
-**Interfaces:** none (build/config only).
+**Context:** Release `b9775` ships a prebuilt android-arm64 `llama-server` that is **dynamically
+linked** — it needs `libllama.so`, `libggml*.so` (incl. runtime-dispatched `libggml-cpu-android_*`
+variants), `libmtmd.so`, `libllama-common.so`, and `libllama-server-impl.so` beside it. Stage **all**
+release `*.so` plus the `llama-server` exec renamed `libllamaserver.so` into `jniLibs/arm64-v8a/`.
+Android extracts them to the executable `nativeLibraryDir`; the service sets `LD_LIBRARY_PATH` so the
+linker finds the deps (Task 7). Staged binaries are git-ignored; the Gradle task re-fetches on a clean
+checkout.
 
-- [ ] **Step 1: Add packaging block to `app/build.gradle.kts`**
+**Interfaces:** none (build/config only). Produces the runtime files the service execs in Task 7.
+
+- [ ] **Step 1: Add packaging + fetch task to `app/build.gradle.kts`**
 
 Inside the `android { ... }` block, after `buildFeatures { compose = true }`, add:
 
@@ -593,6 +607,44 @@ Inside the `android { ... }` block, after `buildFeatures { compose = true }`, ad
             useLegacyPackaging = true
         }
     }
+```
+
+At the **top level** of the file (after the `android { }` block), add the fetch task:
+
+```kotlin
+// Stage the pinned llama.cpp arm64 server + its shared libs into jniLibs. Uses Gradle's built-in
+// tarTree/gzip so no extra plugin is needed. Idempotent: skips if libllamaserver.so already present.
+val llamaRelease = "b9775"
+val llamaUrl =
+    "https://github.com/ggml-org/llama.cpp/releases/download/$llamaRelease/llama-$llamaRelease-bin-android-arm64.tar.gz"
+val jniArm64 = layout.projectDirectory.dir("src/main/jniLibs/arm64-v8a")
+
+val fetchLlamaServer by tasks.registering {
+    description = "Download + stage the llama.cpp $llamaRelease arm64 server into jniLibs"
+    val marker = jniArm64.file("libllamaserver.so").asFile
+    outputs.file(marker)
+    doLast {
+        if (marker.exists()) return@doLast
+        val tarball = layout.buildDirectory.file("llama-dl/llama-$llamaRelease.tar.gz").get().asFile
+        if (!tarball.exists()) {
+            tarball.parentFile.mkdirs()
+            java.net.URI(llamaUrl).toURL().openStream().use { input ->
+                tarball.outputStream().use { input.copyTo(it) }
+            }
+        }
+        copy {
+            from(tarTree(resources.gzip(tarball)))
+            into(jniArm64)
+            include("**/*.so", "**/llama-server")
+            eachFile { path = name } // flatten the llama-bXXXX/ prefix
+            includeEmptyDirs = false
+        }
+        val server = jniArm64.file("llama-server").asFile
+        if (server.exists()) server.renameTo(jniArm64.file("libllamaserver.so").asFile)
+    }
+}
+
+tasks.named("preBuild") { dependsOn(fetchLlamaServer) }
 ```
 
 - [ ] **Step 2: Update `AndroidManifest.xml`**
@@ -649,30 +701,39 @@ Replace the file contents with:
 `app/src/main/jniLibs/arm64-v8a/README.md`:
 
 ```markdown
-# llama-server binary slot
+# llama-server runtime binaries (auto-staged)
 
-Place an **arm64-v8a** `llama-server` build here named **`libllamaserver.so`**.
+The `fetchLlamaServer` Gradle task downloads llama.cpp release **b9775** (android-arm64) and stages
+here, before every build:
 
-- Must be named `lib*.so` so Android packages + extracts it to the app's executable
-  native-lib dir. The app execs `nativeLibraryDir/libllamaserver.so`.
-- Use a build that supports the configured flags (`--spec-type draft-mtp`,
-  `--spec-draft-*`, `--mmproj`, `--tools`, and the `gemma-4` arch).
-- Build with the Android NDK (`cmake -DCMAKE_TOOLCHAIN_FILE=$NDK/build/cmake/android.toolchain.cmake
-  -DANDROID_ABI=arm64-v8a ...`) then copy the `llama-server` executable here as `libllamaserver.so`.
+- `libllamaserver.so` — the `llama-server` executable (renamed so Android packages + extracts it to
+  the executable `nativeLibraryDir`; the app execs `nativeLibraryDir/libllamaserver.so`).
+- all release `*.so` deps (`libllama.so`, `libggml*.so` incl. `libggml-cpu-android_*` variants,
+  `libmtmd.so`, `libllama-common.so`, `libllama-server-impl.so`, …). The service runs the executable
+  with `LD_LIBRARY_PATH=nativeLibraryDir` so these resolve.
 
-Without this file, Start shows "server binary not bundled" and nothing runs.
+These `*.so` are git-ignored. To pin a different build, change `llamaRelease` in `app/build.gradle.kts`
+or drop your own `libllamaserver.so` (+ its deps) here. Without them, Start shows
+"server binary not bundled".
 ```
 
-- [ ] **Step 4: Verify it builds**
+- [ ] **Step 4: Stage binaries and verify the APK contains them**
 
-Run: `& "C:\Users\iguar\Code\ArmedLlama\gradlew.bat" -p "C:\Users\iguar\Code\ArmedLlama" :app:assembleDebug`
-Expected: `BUILD SUCCESSFUL` (the `.so` slot may be empty; that's fine).
+Run:
+```bash
+& "C:\Users\iguar\Code\ArmedLlama\gradlew.bat" -p "C:\Users\iguar\Code\ArmedLlama" :app:fetchLlamaServer :app:assembleDebug
+```
+Expected: `BUILD SUCCESSFUL`. Then verify the libs are packaged:
+```bash
+unzip -l "C:/Users/iguar/Code/ArmedLlama/app/build/outputs/apk/debug/app-debug.apk" | grep -E 'lib/arm64-v8a/(libllamaserver|libllama|libmtmd|libggml)\.so'
+```
+Expected: lines listing `libllamaserver.so`, `libllama.so`, `libmtmd.so`, `libggml.so`.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Commit** (the `.so` are git-ignored; only config + README are tracked)
 
 ```bash
-git add app/build.gradle.kts app/src/main/AndroidManifest.xml app/src/main/jniLibs/arm64-v8a/README.md
-git commit -m "build: legacy jniLibs packaging, FGS perms, llama-server service + binary slot"
+git add .gitignore app/build.gradle.kts app/src/main/AndroidManifest.xml app/src/main/jniLibs/arm64-v8a/README.md
+git commit -m "build: stage b9775 llama-server into jniLibs, FGS perms, service decl"
 ```
 
 ---
@@ -754,7 +815,10 @@ class LlamaServerService : Service() {
         val args = buildArgs(config, binary.path, modelsDir.path)
         LogBus.append("exec: ${args.joinToString(" ")}")
         try {
-            val p = ProcessBuilder(args).redirectErrorStream(true).directory(modelsDir).start()
+            val pb = ProcessBuilder(args).redirectErrorStream(true).directory(modelsDir)
+            // The b9775 server is dynamically linked; its .so deps live in nativeLibraryDir.
+            pb.environment()["LD_LIBRARY_PATH"] = applicationInfo.nativeLibraryDir
+            val p = pb.start()
             process = p
             statusFlow.value = Status.RUNNING
             startForegroundCompat("Running on ${config.host}:${config.port}")

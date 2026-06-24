@@ -42,8 +42,10 @@ flags (they have confirmed one works).
   app-writable storage. The only no-root path is to ship the executable as a `jniLibs` `.so` and run
   it from `applicationInfo.nativeLibraryDir`. Requires `useLegacyPackaging = true` (so the `.so` is
   extracted to disk) and `android:extractNativeLibs="true"`.
-- **Binary slot:** `app/src/main/jniLibs/arm64-v8a/libllamaserver.so` (must be named `lib*.so`).
-  The repo ships the directory with a README; the actual binary is provided by the user.
+- **Binary:** mainline llama.cpp release **b9775** android-arm64, **dynamically linked**. A Gradle
+  `fetchLlamaServer` task downloads it and stages all `*.so` + the `llama-server` exec (renamed
+  `libllamaserver.so`) into `app/src/main/jniLibs/arm64-v8a/` (git-ignored, re-fetchable). The service
+  execs with `LD_LIBRARY_PATH=nativeLibraryDir` so the shared-lib deps resolve.
 - **Model storage:** app-specific external dir `getExternalFilesDir("models")`
   (`Android/data/com.iguar.armedllama/files/models`) — no runtime permission, user-visible in a file
   manager, large enough for ~3.2 GB.
@@ -100,8 +102,9 @@ tokenized `extra_args`. **Unit-tested** against the gemma-4 config (exact argv a
 
 ### 5.5 `server/LlamaServerService.kt` (foreground Service)
 - Lifecycle: `start` → validate binary + model files exist → `ProcessBuilder(args)` with
-  `redirectErrorStream(true)`, working dir = models dir → start process → promote to foreground with
-  a notification → spawn a reader thread piping stdout lines to `LogBus`.
+  `redirectErrorStream(true)`, working dir = models dir, **`LD_LIBRARY_PATH=nativeLibraryDir`** (so the
+  dynamically-linked server finds its `.so` deps) → start process → promote to foreground with a
+  notification → spawn a reader thread piping stdout lines to `LogBus`.
 - `stop` → `process.destroy()` (then `destroyForcibly()` after grace) → stop foreground/self.
 - On unexpected exit: emit exit code to `LogBus`, broadcast status → stopped.
 - Declared with `foregroundServiceType="specialUse"`.
@@ -168,8 +171,8 @@ tests `IniStoreTest`, `ArgsBuilderTest`, `ModelDownloaderTest`;
 
 ## 11. Risks / open items
 
-- A *mainline* binary will reject `--spec-type/--spec-draft-*/--tools` and may not support the
-  `gemma-4` arch. Mitigated: user has a tested compatible build; errors surface in logs regardless.
+- The `gemma-4` arch / `--spec-type draft-mtp` support depends on the bundled build (b9775). User has
+  tested this release with these flags; any rejection/load error surfaces live in the logs regardless.
 - Large downloads (~3.2 GB) on metered networks — out of scope to gate; resumable.
 - `useLegacyPackaging=true` slightly enlarges the APK (binary stored uncompressed-on-disk at runtime).
 - Repo is **not** a git repository yet, so this spec is written but not committed.

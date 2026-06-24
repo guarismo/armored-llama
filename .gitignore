@@ -11,6 +11,10 @@
 /build
 app/build
 /captures
+# SDD scratch (briefs, reports, review packages, ledger)
+/.superpowers/
+# staged llama.cpp runtime binaries (re-fetched by the fetchLlamaServer Gradle task)
+app/src/main/jniLibs/arm64-v8a/*.so
 .externalNativeBuild
 .cxx
 local.properties
