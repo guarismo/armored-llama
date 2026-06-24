@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(.\\\\gradlew.bat :app:testDebugUnitTest --tests \"com.iguar.armedllama.device.ProcParsersTest\" --console=plain 2>&1 | Select-Object -Last 40)",
+      "Bash(command -v kotlinc)",
+      "Bash(kotlinc -version)",
+      "Bash(command -v kotlin)",
+      "Read(//c/Users/iguar/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/**)"
+    ]
+  }
+}

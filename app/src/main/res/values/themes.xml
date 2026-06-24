@@ -1,0 +1,11 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Base theme is a no-action-bar Material3 shell; all real theming
+         (the design tokens, dark/light) lives in Compose (ui/theme).
+         The window background uses the token bg so there is no white flash
+         before Compose draws. -->
+    <style name="Theme.ArmedLlama" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="android:windowBackground">@color/token_bg</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+</resources>

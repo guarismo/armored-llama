@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Design token bg (dark). Used only as the pre-Compose window background. -->
+    <color name="token_bg">#FF0B0F14</color>
+</resources>
