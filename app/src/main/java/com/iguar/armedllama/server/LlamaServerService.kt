@@ -159,7 +159,7 @@ class LlamaServerService : Service() {
 
         fun stop(context: Context) {
             val i = Intent(context, LlamaServerService::class.java).setAction(ACTION_STOP)
-            context.startService(i)
+            runCatching { context.startService(i) }
         }
     }
 }

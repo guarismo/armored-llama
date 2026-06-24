@@ -166,12 +166,14 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
     fun updateSettings(transform: (ServerSettings) -> ServerSettings) {
         val newSettings = transform(state.settings)
         state = state.copy(settings = newSettings)
-        val cfg = configRepo.load().copy(
-            ctx = newSettings.ctx,
-            threads = newSettings.threads,
-            port = newSettings.port,
-        )
-        configRepo.save(cfg)
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val cfg = configRepo.load().copy(
+                ctx = newSettings.ctx,
+                threads = newSettings.threads,
+                port = newSettings.port,
+            )
+            configRepo.save(cfg)
+        }
     }
 
     // Update llama.cpp (WIRE THIS #9) ----------------------------------------------------------
@@ -248,14 +250,21 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun rnd(min: Float, max: Float): Float = min + Random.nextFloat() * (max - min)
 
-    private fun seedModels(): List<ModelEntry> = listOf(
-        ModelEntry("1", "bartowski/Llama-3.1-8B-Instruct-GGUF", "Llama-3.1-8B-Instruct", "Q4_K_M", 4.9f, ModelState.INSTALLED),
-        ModelEntry("2", "ggml-org/gemma-2-2b-it-GGUF", "Gemma-2-2B-it", "Q4_K_M", 1.7f),
-        ModelEntry("3", "bartowski/Qwen2.5-7B-Instruct-GGUF", "Qwen2.5-7B-Instruct", "Q5_K_M", 5.4f),
-        ModelEntry("4", "microsoft/Phi-3.5-mini-instruct-GGUF", "Phi-3.5-mini-instruct", "Q4_K_M", 2.4f),
-        ModelEntry("5", "bartowski/Mistral-7B-Instruct-v0.3-GGUF", "Mistral-7B-Instruct-v0.3", "Q4_K_M", 4.4f),
-        ModelEntry("6", "ggml-org/SmolLM2-1.7B-Instruct-GGUF", "SmolLM2-1.7B-Instruct", "Q8_0", 1.8f),
-    )
+    private fun seedModels(): List<ModelEntry> {
+        val cfg = configRepo.load()
+        val files = listOf(cfg.modelFile, cfg.draftFile, cfg.mmprojFile).filter { it.isNotBlank() }
+        val installed = files.isNotEmpty() && files.all { downloader.localSize(it) > 0L }
+        return listOf(
+            ModelEntry(
+                id = "gemma-4",
+                repo = cfg.repo,
+                name = "gemma-4-E2B-it-qat",
+                quant = "Q2_K_XL",
+                sizeGB = 3.2f,
+                state = if (installed) ModelState.INSTALLED else ModelState.IDLE,
+            ),
+        )
+    }
 }
 
 /** Round a float to a whole number for display. */
