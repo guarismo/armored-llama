@@ -3,15 +3,18 @@ package com.iguar.armedllama
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.iguar.armedllama.server.ConfigRepository
+import com.iguar.armedllama.server.LlamaServerService
+import com.iguar.armedllama.server.LogBus
+import com.iguar.armedllama.server.ModelDownloader
+import kotlinx.coroutines.flow.collect
 import com.iguar.armedllama.device.DeviceTelemetry
 import com.iguar.armedllama.model.CORE_COUNT
 import com.iguar.armedllama.model.HISTORY_SIZE
 import com.iguar.armedllama.model.Histories
-import com.iguar.armedllama.model.LOG_CAP
-import com.iguar.armedllama.model.LogLine
-import com.iguar.armedllama.model.Metrics
 import com.iguar.armedllama.model.ModelEntry
 import com.iguar.armedllama.model.ModelState
 import com.iguar.armedllama.model.MonitorUiState
@@ -22,7 +25,6 @@ import com.iguar.armedllama.model.ServerSettings
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import java.util.Locale
 import kotlin.math.roundToInt
 import kotlin.random.Random
 
@@ -32,7 +34,10 @@ import kotlin.random.Random
  * "WIRE THIS" item from the README; to productionize, replace the body of [tick] (and the
  * deploy/download coroutines) with real polling / process IO and keep the rest.
  */
-class MonitorViewModel : ViewModel() {
+class MonitorViewModel(app: Application) : AndroidViewModel(app) {
+
+    private val configRepo = ConfigRepository(app)
+    private val downloader = ModelDownloader(configRepo.modelsDir())
 
     var state by mutableStateOf(
         MonitorUiState(models = seedModels())
@@ -56,6 +61,17 @@ class MonitorViewModel : ViewModel() {
             ),
         )
         startTicker()
+        // Real server logs replace the mock generator.
+        viewModelScope.launch { LogBus.lines.collect { state = state.copy(logs = it) } }
+        // Reflect service status into UI running state.
+        viewModelScope.launch {
+            LlamaServerService.status.collect { s ->
+                state = state.copy(
+                    serverStatus = s,
+                    running = s == LlamaServerService.Status.RUNNING || s == LlamaServerService.Status.STARTING,
+                )
+            }
+        }
     }
 
     // ----- Telemetry loop (mock) --------------------------------------------------------------
@@ -127,27 +143,15 @@ class MonitorViewModel : ViewModel() {
             pp = push(h.pp, next.pp / 360f),
         )
 
-        var logs = state.logs
-        // README: a new log line roughly every 3rd tick (~840 ms) while running.
-        if (running && tickCount % 3 == 0) {
-            logs = appendLog(logs, nextLogLine(next))
-        }
         tickCount++
-
-        state = state.copy(metrics = next, histories = histories, logs = logs)
+        state = state.copy(metrics = next, histories = histories)
     }
 
     // ----- Public actions ---------------------------------------------------------------------
 
-    /** WIRE THIS (#1): launch / terminate the real llama-server process here. */
     fun toggleRunning() {
-        val nowRunning = !state.running
-        state = state.copy(running = nowRunning)
-        if (nowRunning) {
-            state = state.copy(
-                logs = appendLog(state.logs, LogLine(now(), "main: server listening on http://0.0.0.0:${state.settings.port}")),
-            )
-        }
+        val ctx = getApplication<Application>()
+        if (state.running) LlamaServerService.stop(ctx) else LlamaServerService.start(ctx)
     }
 
     fun openMenu() { state = state.copy(panel = Panel.MENU) }
@@ -184,16 +188,25 @@ class MonitorViewModel : ViewModel() {
 
     fun downloadModel(id: String) {
         val target = state.models.firstOrNull { it.id == id } ?: return
-        if (target.state != ModelState.IDLE) return
+        if (target.state == ModelState.DOWNLOADING) return
+        val config = configRepo.load()
+        val files = listOf(config.modelFile, config.draftFile, config.mmprojFile).filter { it.isNotBlank() }
         viewModelScope.launch {
             updateModel(id) { it.copy(state = ModelState.DOWNLOADING, progress = 0f) }
-            var progress = 0f
-            while (progress < 1f) {
-                delay(240)
-                progress = (progress + rnd(0.04f, 0.12f)).coerceAtMost(1f)
-                updateModel(id) { it.copy(progress = progress) }
+            try {
+                files.forEachIndexed { idx, file ->
+                    downloader.download(config.repo, file) { written, total ->
+                        val frac = if (total > 0) written.toFloat() / total else 0f
+                        val overall = (idx + frac) / files.size
+                        updateModel(id) { it.copy(progress = overall.coerceIn(0f, 1f)) }
+                    }
+                }
+                updateModel(id) { it.copy(state = ModelState.INSTALLED, progress = 1f) }
+                LogBus.append("download complete: ${config.repo}")
+            } catch (e: Exception) {
+                updateModel(id) { it.copy(state = ModelState.IDLE) }
+                LogBus.append("download failed: ${e.message}")
             }
-            updateModel(id) { it.copy(state = ModelState.INSTALLED) }
         }
     }
 
@@ -205,9 +218,6 @@ class MonitorViewModel : ViewModel() {
 
     private fun push(history: List<Float>, value: Float): List<Float> =
         (history + value.coerceIn(0f, 1f)).takeLast(HISTORY_SIZE)
-
-    private fun appendLog(logs: List<LogLine>, line: LogLine): List<LogLine> =
-        (logs + line).takeLast(LOG_CAP)
 
     /** Random walk that drifts toward and stays inside [min, max]. */
     private fun walk(current: Float, min: Float, max: Float, step: Float): Float {
@@ -222,36 +232,6 @@ class MonitorViewModel : ViewModel() {
     private fun ease(current: Float, target: Float, k: Float): Float = current + (target - current) * k
 
     private fun rnd(min: Float, max: Float): Float = min + Random.nextFloat() * (max - min)
-
-    private fun now(): String {
-        val t = System.currentTimeMillis()
-        val s = (t / 1000) % 86400
-        return String.format(Locale.US, "%02d:%02d:%02d.%03d", s / 3600, (s % 3600) / 60, s % 60, (t % 1000))
-    }
-
-    /** A plausible llama.cpp server log line. WIRE THIS (#2): replace with real captured lines. */
-    private fun nextLogLine(m: Metrics): LogLine {
-        val task = 300 + Random.nextInt(40)
-        val nPast = 120 + Random.nextInt(80)
-        val nTokens = 12 + Random.nextInt(40)
-        val msPerTok = (1000f / m.tps.coerceAtLeast(1f))
-        val body = when (Random.nextInt(5)) {
-            0 -> "slot launch_slot_: id 0 | task $task | processing task"
-            1 -> "slot update_slots: id 0 | task $task | new prompt, n_ctx_slot = ${state.settings.ctx}, n_keep = 0, n_prompt_tokens = $nTokens"
-            2 -> "slot release: id 0 | task $task | stop processing: n_past = $nPast, truncated = 0"
-            3 -> String.format(
-                Locale.US,
-                "print_timings: prompt eval time = %.2f ms / %d tokens (%.2f ms per token, %.2f tokens per second)",
-                nTokens * (1000f / m.pp.coerceAtLeast(1f)), nTokens, 1000f / m.pp.coerceAtLeast(1f), m.pp,
-            )
-            else -> String.format(
-                Locale.US,
-                "print_timings: eval time = %.2f ms / %d runs (%.2f ms per token, %.2f tokens per second)",
-                nTokens * msPerTok, nTokens, msPerTok, m.tps,
-            )
-        }
-        return LogLine(now(), body)
-    }
 
     private fun seedModels(): List<ModelEntry> = listOf(
         ModelEntry("1", "bartowski/Llama-3.1-8B-Instruct-GGUF", "Llama-3.1-8B-Instruct", "Q4_K_M", 4.9f, ModelState.INSTALLED),
