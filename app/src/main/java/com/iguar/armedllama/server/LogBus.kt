@@ -25,6 +25,7 @@ object LogBus {
         runCatching { logFile?.appendText("${line.time} $body\n") }
     }
 
+    @Synchronized
     fun clear() { _lines.value = emptyList() }
 
     private fun stamp(): String {
