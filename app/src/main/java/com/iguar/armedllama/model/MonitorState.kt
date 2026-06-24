@@ -1,5 +1,7 @@
 package com.iguar.armedllama.model
 
+import com.iguar.armedllama.server.LlamaServerService
+
 /**
  * The state model from the README ("State Management"). Everything the UI renders lives here;
  * the ViewModel owns instances and swaps them immutably so Compose recomposes.
@@ -92,8 +94,8 @@ data class ModelEntry(
 /** The full UI state, parent-owned (per README). */
 data class MonitorUiState(
     val running: Boolean = false,
-    val serverStatus: com.iguar.armedllama.server.LlamaServerService.Status =
-        com.iguar.armedllama.server.LlamaServerService.Status.STOPPED,
+    val serverStatus: LlamaServerService.Status =
+        LlamaServerService.Status.STOPPED,
     val host: String = "shockwave",
     val modelFile: String = "Llama-3.1-8B-Q4_K_M",
     val metrics: Metrics = Metrics(),

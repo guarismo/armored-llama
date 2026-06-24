@@ -29,10 +29,11 @@ import kotlin.math.roundToInt
 import kotlin.random.Random
 
 /**
- * Drives the dashboard. **Everything here is mock data** — an eased random walk on a 280 ms
- * timer, exactly mirroring the prototype. Each producer is annotated with the matching
- * "WIRE THIS" item from the README; to productionize, replace the body of [tick] (and the
- * deploy/download coroutines) with real polling / process IO and keep the rest.
+ * Drives the dashboard. Server control ([toggleRunning]), model downloads ([downloadModel]) and the
+ * log feed are wired to the real [com.iguar.armedllama.server.LlamaServerService],
+ * [com.iguar.armedllama.server.ModelDownloader] and [com.iguar.armedllama.server.LogBus]. Device
+ * telemetry (CPU %, memory, temperature, per-core MHz) is read live in [tick]; GPU and throughput
+ * metrics there are still a mock random walk pending real sources.
  */
 class MonitorViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -183,7 +184,7 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
         state = state.copy(release = transform(state.release))
     }
 
-    // Download model (WIRE THIS #10) -----------------------------------------------------------
+    // Download model — real files from ConfigRepository ----------------------------------------
     fun updateHfQuery(q: String) { state = state.copy(hfQuery = q) }
 
     fun downloadModel(id: String) {
@@ -192,6 +193,11 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
         val config = configRepo.load()
         val files = listOf(config.modelFile, config.draftFile, config.mmprojFile).filter { it.isNotBlank() }
         viewModelScope.launch {
+            if (files.isEmpty()) {
+                LogBus.append("download skipped: no model files configured")
+                updateModel(id) { it.copy(state = ModelState.IDLE) }
+                return@launch
+            }
             updateModel(id) { it.copy(state = ModelState.DOWNLOADING, progress = 0f) }
             try {
                 files.forEachIndexed { idx, file ->
