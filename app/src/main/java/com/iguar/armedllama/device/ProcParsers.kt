@@ -54,12 +54,14 @@ fun cpuPercent(prev: CpuTimes, curr: CpuTimes): Float? {
 }
 
 /**
- * Parse a thermal-zone `temp` reading. Values ≥ 1000 are treated as millidegrees
- * (the common case); smaller values are taken as whole °C. Null on garbage.
+ * Parse a thermal-zone `temp` reading (always millidegrees Celsius) into °C. Null on garbage.
+ * Implausible results (sentinels, disabled sensors) are filtered downstream by [selectTemperature].
  */
 fun parseMilliCelsius(text: String): Float? {
-    val v = text.trim().toLongOrNull() ?: return null
-    return if (v >= 1000L) v / 1000f else v.toFloat()
+    // thermal_zone*/temp is always millidegrees Celsius on Linux/Android. Sub-degree results
+    // (e.g. a disabled-sensor sentinel like "100" -> 0.1C) are filtered out by selectTemperature.
+    val milli = text.trim().toLongOrNull() ?: return null
+    return milli / 1000f
 }
 
 /** Convert a cpufreq kHz reading (`scaling_cur_freq`/`cpuinfo_max_freq`) to MHz. */

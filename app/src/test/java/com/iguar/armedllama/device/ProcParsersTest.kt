@@ -75,9 +75,20 @@ class ProcParsersTest {
     }
 
     @Test
-    fun parseMilliCelsius_passesThroughPlainCelsius() {
-        // Some zones already report whole degrees.
-        assertEquals(42f, parseMilliCelsius("42")!!, 0.001f)
+    fun parseMilliCelsius_treatsValueAsMillidegrees() {
+        // thermal_zone*/temp is always millidegrees on Linux/Android. A small sentinel like the
+        // `soc` zone's raw "100" is 0.1°C (a disabled sensor), NOT 100°C — selectTemperature drops it.
+        assertEquals(0.1f, parseMilliCelsius("100")!!, 0.001f)
+    }
+
+    @Test
+    fun selectTemperature_ignoresSubDegreeSentinelSocZone() {
+        // Regression (OnePlus 8T): a `soc` zone reporting raw "100" (0.1°C) must not beat real CPU zones.
+        val zones = listOf(
+            ThermalZone(type = "soc", celsius = parseMilliCelsius("100")!!),
+            ThermalZone(type = "cpu-0-0-usr", celsius = parseMilliCelsius("31100")!!),
+        )
+        assertEquals(31.1f, selectTemperature(zones)!!, 0.001f)
     }
 
     @Test
