@@ -55,11 +55,13 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
         // Size the core grid to the real CPU and scale bars by the real max frequency,
         // both read once at startup. Falls back to the mock defaults when sysfs is hidden.
         val coreCount = telemetry.coreCount().takeIf { it > 0 } ?: CORE_COUNT
+        val cfg = configRepo.load()
         state = state.copy(
             metrics = state.metrics.copy(
                 cores = List(coreCount) { 600f },
                 maxCoreMhz = telemetry.maxCoreMhz() ?: state.metrics.maxCoreMhz,
             ),
+            settings = state.settings.copy(ctx = cfg.ctx, threads = cfg.threads, port = cfg.port),
         )
         startTicker()
         // Real server logs replace the mock generator.
@@ -160,9 +162,16 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
     fun navigate(panel: Panel) { state = state.copy(panel = panel) }
     fun backToMenu() { state = state.copy(panel = Panel.MENU) }
 
-    // Settings (WIRE THIS #8: persist + apply as launch flags) --------------------------------
+    // Settings (persists ctx/threads/port to config.ini) --------------------------------------
     fun updateSettings(transform: (ServerSettings) -> ServerSettings) {
-        state = state.copy(settings = transform(state.settings))
+        val newSettings = transform(state.settings)
+        state = state.copy(settings = newSettings)
+        val cfg = configRepo.load().copy(
+            ctx = newSettings.ctx,
+            threads = newSettings.threads,
+            port = newSettings.port,
+        )
+        configRepo.save(cfg)
     }
 
     // Update llama.cpp (WIRE THIS #9) ----------------------------------------------------------
