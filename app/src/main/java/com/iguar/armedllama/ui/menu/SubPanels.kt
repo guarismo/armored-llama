@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -29,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.iguar.armedllama.model.ModelEntry
@@ -44,11 +46,16 @@ import kotlin.math.roundToInt
 
 // ----- Settings ------------------------------------------------------------------------------
 
-private val CTX_OPTIONS = listOf(2048, 4096, 8192, 16384, 32768)
+private val CTX_OPTIONS = listOf(2048, 4096, 8192, 16384, 32768, 65536, 131072)
+
+/** At/above this, context is impractical on a CPU-only build (minutes-long prompt ingest, SWA cache
+ *  churn, RAM-heavy) — flagged in the UI. Verified on-device: 64K took ~12 min to ingest a 13K prompt. */
+private const val CTX_WARN_THRESHOLD = 65536
 
 @Composable
 fun SettingsPanel(state: MonitorUiState, onBack: () -> Unit, callbacks: MenuCallbacks) {
     val s = state.settings
+    val c = MonitorTheme.colors
     Column(modifier = Modifier.fillMaxSize()) {
         PanelHeader("Settings", onBack)
         Column(
@@ -61,13 +68,27 @@ fun SettingsPanel(state: MonitorUiState, onBack: () -> Unit, callbacks: MenuCall
             SettingGroup("Inference") {
                 SettingRow("Context size", "-c / --ctx-size") {
                     val idx = CTX_OPTIONS.indexOf(s.ctx).coerceAtLeast(0)
-                    Stepper(
-                        value = s.ctx.toString(),
-                        decrementEnabled = idx > 0,
-                        incrementEnabled = idx < CTX_OPTIONS.lastIndex,
-                        onDecrement = { callbacks.onUpdateSettings { it.copy(ctx = CTX_OPTIONS[(idx - 1).coerceAtLeast(0)]) } },
-                        onIncrement = { callbacks.onUpdateSettings { it.copy(ctx = CTX_OPTIONS[(idx + 1).coerceAtMost(CTX_OPTIONS.lastIndex)]) } },
-                    )
+                    val tooBig = s.ctx >= CTX_WARN_THRESHOLD
+                    Column(horizontalAlignment = Alignment.End) {
+                        Stepper(
+                            value = s.ctx.toString(),
+                            valueColor = if (tooBig) c.bad else null,
+                            decrementEnabled = idx > 0,
+                            incrementEnabled = idx < CTX_OPTIONS.lastIndex,
+                            onDecrement = { callbacks.onUpdateSettings { it.copy(ctx = CTX_OPTIONS[(idx - 1).coerceAtLeast(0)]) } },
+                            onIncrement = { callbacks.onUpdateSettings { it.copy(ctx = CTX_OPTIONS[(idx + 1).coerceAtMost(CTX_OPTIONS.lastIndex)]) } },
+                        )
+                        if (tooBig) {
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                "Impractical on CPU — very slow, RAM-heavy",
+                                style = MonitorType.monoCaption,
+                                color = c.bad,
+                                textAlign = TextAlign.End,
+                                modifier = Modifier.widthIn(max = 160.dp),
+                            )
+                        }
+                    }
                 }
                 SettingRow("CPU threads", "--threads") {
                     Stepper(
@@ -78,14 +99,14 @@ fun SettingsPanel(state: MonitorUiState, onBack: () -> Unit, callbacks: MenuCall
                         onIncrement = { callbacks.onUpdateSettings { it.copy(threads = (it.threads + 1).coerceAtMost(16)) } },
                     )
                 }
-                SettingRow("GPU layers", "-ngl") {
-                    Stepper(
-                        value = s.gpuLayers.toString(),
-                        decrementEnabled = s.gpuLayers > 0,
-                        incrementEnabled = s.gpuLayers < 99,
-                        onDecrement = { callbacks.onUpdateSettings { it.copy(gpuLayers = (it.gpuLayers - 1).coerceAtLeast(0)) } },
-                        onIncrement = { callbacks.onUpdateSettings { it.copy(gpuLayers = (it.gpuLayers + 1).coerceAtMost(99)) } },
-                    )
+            }
+
+            SettingGroup("Model") {
+                SettingRow("Speculative decoding", "--model-draft / --spec-type") {
+                    Toggle(s.useDraft) { callbacks.onUpdateSettings { it.copy(useDraft = !it.useDraft) } }
+                }
+                SettingRow("Vision (multimodal)", "--mmproj · ~1 GB RAM") {
+                    Toggle(s.useMmproj) { callbacks.onUpdateSettings { it.copy(useMmproj = !it.useMmproj) } }
                 }
             }
 

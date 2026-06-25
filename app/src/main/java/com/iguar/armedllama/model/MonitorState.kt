@@ -23,11 +23,8 @@ enum class Panel { MENU, SETTINGS, RELEASE, HF }
 data class Metrics(
     val cpu: Float = 3f,          // %  (/proc/stat)
     val temp: Float = 33f,        // °C (thermal_zone*/temp)
-    val tps: Float = 0f,          // generation tok/s (server timings/metrics)
-    val pp: Float = 0f,           // prompt-processing tok/s
-    val gpu: Float = 0f,          // %  (vendor sysfs, e.g. kgsl gpubusy)
-    val gpuMemUsed: Float = 0.4f, // GB
-    val gpuMemTotal: Float = 5.8f,// GB
+    val tps: Float = 0f,          // generation tok/s (parsed from server print_timing log)
+    val pp: Float = 0f,           // prompt-processing tok/s (parsed from server print_timing log)
     val ramUsed: Float = 3000f,   // MB (/proc/meminfo)
     val ramTotal: Float = 7616f,  // MB (placeholder per README)
     val cores: List<Float> = List(CORE_COUNT) { 600f }, // MHz (cpufreq/scaling_cur_freq)
@@ -51,13 +48,15 @@ data class Histories(
 data class LogLine(val time: String, val body: String)
 
 data class ServerSettings(
-    val ctx: Int = 4096,          // -c / --ctx-size  (2048/4096/8192/16384/32768)
+    val ctx: Int = 32768,         // -c / --ctx-size  (…/16384/32768/65536/131072)
     val threads: Int = 6,         // --threads (1..16)
-    val gpuLayers: Int = 33,      // -ngl (0..99)
     val port: Int = 8080,         // --port (1024..65535)
-    val flashAttn: Boolean = true,    // -fa
-    val contBatch: Boolean = true,    // --cont-batching
+    val flashAttn: Boolean = true,    // --flash-attn on|off
+    val contBatch: Boolean = true,    // --cont-batching / --no-cont-batching
     val mlock: Boolean = false,       // --mlock
+    val useDraft: Boolean = true,     // speculative decoding (--model-draft + --spec-*)
+    val useMmproj: Boolean = true,    // vision/multimodal (--mmproj)
+    // No -ngl: the bundled llama.cpp build is CPU-only, so GPU layers would be a no-op.
 )
 
 enum class ReleaseState { IDLE, DOWNLOADING, DEPLOYING, DEPLOYED }

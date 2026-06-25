@@ -2,7 +2,10 @@ package com.iguar.armedllama.server
 
 import com.iguar.armedllama.model.LOG_CAP
 import com.iguar.armedllama.model.LogLine
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.io.File
 import java.util.Locale
@@ -11,6 +14,18 @@ import java.util.Locale
 object LogBus {
     private val _lines = MutableStateFlow<List<LogLine>>(emptyList())
     val lines: StateFlow<List<LogLine>> = _lines
+
+    /**
+     * Every appended line body, uncapped. [lines] is capped to [LOG_CAP] for display, which makes
+     * its size unsuitable for "what's new" detection (size pins once full). Consumers that must see
+     * every line — e.g. throughput parsing (#7) — collect this instead. Buffered + DROP_OLDEST so
+     * [append] from the service reader thread never blocks.
+     */
+    private val _raw = MutableSharedFlow<String>(
+        extraBufferCapacity = 256,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+    val raw: SharedFlow<String> = _raw
 
     @Volatile private var logFile: File? = null
 
@@ -22,6 +37,7 @@ object LogBus {
     fun append(body: String) {
         val line = LogLine(stamp(), body)
         _lines.value = (_lines.value + line).takeLast(LOG_CAP)
+        _raw.tryEmit(body)
         runCatching { logFile?.appendText("${line.time} $body\n") }
     }
 

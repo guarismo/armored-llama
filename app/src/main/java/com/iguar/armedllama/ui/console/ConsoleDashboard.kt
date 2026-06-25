@@ -119,8 +119,8 @@ private fun StatRow(state: MonitorUiState) {
     ) {
         StatTile("CPU", "${m.cpu.roundToInt()}", "%", c.text, Modifier.weight(1f))
         StatTile("TEMP", "${m.temp.roundToInt()}", "°C", c.temp, Modifier.weight(1f))
-        StatTile("TOK/S", "${m.tps.roundToInt()}", "gen", c.accent2, Modifier.weight(1f), subline = "pp ${m.pp.roundToInt()}/s")
-        StatTile("GPU", "${m.gpu.roundToInt()}", "%", c.text, Modifier.weight(1f))
+        StatTile("TOK/S", "${m.tps.roundToInt()}", "gen", c.accent2, Modifier.weight(1f))
+        StatTile("PP", "${m.pp.roundToInt()}", "t/s", c.accent, Modifier.weight(1f))
     }
 }
 

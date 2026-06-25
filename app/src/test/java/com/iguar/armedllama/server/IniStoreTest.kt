@@ -26,6 +26,22 @@ class IniStoreTest {
         assertEquals(config, restored)
     }
 
+    @Test fun optimizationFlagsRoundTripThroughIni() {
+        val config = LlamaConfig(flashAttn = false, contBatch = false, mlock = true, ctx = 32768)
+        val restored = llamaConfigFromIni(config.toIni())
+        assertEquals(false, restored.flashAttn)
+        assertEquals(false, restored.contBatch)
+        assertEquals(true, restored.mlock)
+        assertEquals(32768, restored.ctx)
+    }
+
+    @Test fun modelFeatureTogglesRoundTripThroughIni() {
+        val config = LlamaConfig(useMmproj = false, useDraft = false)
+        val restored = llamaConfigFromIni(config.toIni())
+        assertEquals(false, restored.useMmproj)
+        assertEquals(false, restored.useDraft)
+    }
+
     @Test fun llamaConfigFromIni_fallsBackToDefaultsForMissingKeys() {
         val cfg = llamaConfigFromIni("[server]\nport = 9090\n")
         assertEquals(9090, cfg.port)

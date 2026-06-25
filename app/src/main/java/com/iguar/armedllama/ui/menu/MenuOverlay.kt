@@ -138,7 +138,7 @@ private fun DrawerContent(state: MonitorUiState, onNavigate: (Panel) -> Unit) {
             }
             Spacer(Modifier.height(20.dp))
 
-            DrawerRow(Icons.Filled.Settings, "Settings", "Context, threads, GPU layers") { onNavigate(Panel.SETTINGS) }
+            DrawerRow(Icons.Filled.Settings, "Settings", "Context, threads, optimizations") { onNavigate(Panel.SETTINGS) }
             DrawerRow(Icons.Filled.Download, "Update llama.cpp", "Download & deploy latest release", badge = "NEW") { onNavigate(Panel.RELEASE) }
             DrawerRow(null, "Download model 🤗", "Browse GGUF on Hugging Face") { onNavigate(Panel.HF) }
 

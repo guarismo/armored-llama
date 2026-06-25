@@ -41,7 +41,9 @@ fun LlamaConfig.toIni(): String = writeIni(
             "ctx" to ctx.toString(),
             "threads" to threads.toString(),
             "no_mmap" to noMmap.toString(),
-            "tools" to tools,
+            "flash_attn" to flashAttn.toString(),
+            "cont_batching" to contBatch.toString(),
+            "mlock" to mlock.toString(),
             "spec_type" to specType,
             "spec_draft_n_max" to specDraftNMax.toString(),
             "spec_draft_p_min" to specDraftPMin.toString(),
@@ -52,6 +54,8 @@ fun LlamaConfig.toIni(): String = writeIni(
             "model" to modelFile,
             "draft" to draftFile,
             "mmproj" to mmprojFile,
+            "use_draft" to useDraft.toString(),
+            "use_mmproj" to useMmproj.toString(),
         ),
     ),
 )
@@ -67,7 +71,9 @@ fun llamaConfigFromIni(text: String): LlamaConfig {
         ctx = s["ctx"]?.toIntOrNull() ?: d.ctx,
         threads = s["threads"]?.toIntOrNull() ?: d.threads,
         noMmap = s["no_mmap"]?.toBooleanStrictOrNull() ?: d.noMmap,
-        tools = s["tools"] ?: d.tools,
+        flashAttn = s["flash_attn"]?.toBooleanStrictOrNull() ?: d.flashAttn,
+        contBatch = s["cont_batching"]?.toBooleanStrictOrNull() ?: d.contBatch,
+        mlock = s["mlock"]?.toBooleanStrictOrNull() ?: d.mlock,
         specType = s["spec_type"] ?: d.specType,
         specDraftNMax = s["spec_draft_n_max"]?.toIntOrNull() ?: d.specDraftNMax,
         specDraftPMin = s["spec_draft_p_min"]?.toFloatOrNull() ?: d.specDraftPMin,
@@ -76,5 +82,7 @@ fun llamaConfigFromIni(text: String): LlamaConfig {
         modelFile = m["model"] ?: d.modelFile,
         draftFile = m["draft"] ?: d.draftFile,
         mmprojFile = m["mmproj"] ?: d.mmprojFile,
+        useDraft = m["use_draft"]?.toBooleanStrictOrNull() ?: d.useDraft,
+        useMmproj = m["use_mmproj"]?.toBooleanStrictOrNull() ?: d.useMmproj,
     )
 }

@@ -13,8 +13,10 @@ all three sub-screens). **Device telemetry — CPU %, per-core MHz, memory and t
 fallback when a source is hidden (SELinux, emulator, offline core). The core grid is sized to the
 real CPU and bars scale by `cpuinfo_max_freq`. **The server now really runs**: Start/Stop launch a
 bundled `llama-server` via a foreground service, its real logs stream into the feed, and the gemma-4
-model downloads from Hugging Face. **GPU, throughput (#6–7) and the llama.cpp self-update (#9) are
-still mock.** See the "WIRE THIS" list below.
+model downloads from Hugging Face. **Throughput (tok/s + prompt-processing) is parsed live from the
+server log and shown as two stat tiles, and the Settings flags now reach the launch.** GPU telemetry
+was dropped (the bundled build is CPU-only). The llama.cpp self-update (#9) remains mock. See the
+"WIRE THIS" list below.
 
 The real reads live in `device/`: pure parsers in `ProcParsers.kt` and IO in `DeviceTelemetry.kt`
 (over a `FileSource` seam so the logic is unit-tested without a device). The server runtime lives in
@@ -54,12 +56,19 @@ real telemetry over mock; logs/status come from the service.
 4. ✅ **Memory** — done. `DeviceTelemetry.memory()` from `/proc/meminfo` (`MemTotal`/`MemAvailable`).
 5. ✅ **Temperature** — done. `DeviceTelemetry.temperature()` scans `thermal_zone*/temp`, preferring
    a CPU/SoC zone (`selectTemperature`).
-6. **GPU % + mem** — `tick()` `gpu`/`gpuMem*`; vendor sysfs (Adreno `kgsl`). Hide if unreadable.
-7. **Throughput** — `tick()` `tps` (gen) + `pp` (prompt); parse server timings / `/metrics`.
-8. ◐ **Settings → launch flags** — partial. `MonitorViewModel.updateSettings` now persists
-   `ctx/threads/port` to `config.ini` (`server/ConfigRepository`), and the full flag set is applied
-   to the launch via `server/ArgsBuilder`. Still TODO: surface the advanced flags (mmproj/draft/spec)
-   in the Settings UI, and move the synchronous `config.ini` write off the main thread.
+6. ✖ **GPU** — removed. The bundled llama.cpp build is CPU-only, so GPU metrics were misleading. The
+   GPU% stat tile was replaced by a **PP** (prompt-processing t/s) tile; the `gpu*` metric fields,
+   `DeviceTelemetry.gpuPercent()` and `parsePercent` were deleted.
+7. ✅ **Throughput** — done. `server/ThroughputParser` parses the server's live `print_timing`
+   lines (`tg` for gen tok/s, `prompt processing …/X tokens per second` for pp, plus the final
+   `eval time` snapshots) off `LogBus.raw` (uncapped); zeroed on `all slots are idle` and on stop.
+   The dashboard shows two tiles: **TOK/S** (generation) and **PP** (prompt processing).
+8. ◐ **Settings → launch flags** — done for the exposed controls. `updateSettings` persists
+   `ctx/threads/port` + `flash_attn/cont_batching/mlock` to `config.ini`, seeded back on startup and
+   applied at launch via `server/ArgsBuilder` (`--flash-attn on|off`, `--cont-batching`/
+   `--no-cont-batching`, `--mlock`). GPU-layers control removed (CPU-only build). Changes apply on
+   the next Stop→Start (argv is built at process launch). Still TODO: surface the model flags
+   (mmproj/draft/spec) in the UI, and move the `config.ini` write off the main thread.
 9. **Update llama.cpp** — `MonitorViewModel.startDeploy()`; GitHub Releases API for
    `ggml-org/llama.cpp`, download `android-arm64`, install, restart. (Still mock; the runtime binary
    is currently bundled at build time — see Build below.)

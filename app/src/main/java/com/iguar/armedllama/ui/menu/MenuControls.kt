@@ -27,6 +27,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.iguar.armedllama.ui.components.SectionLabel
 import com.iguar.armedllama.ui.components.panel
@@ -84,6 +85,7 @@ fun Stepper(
     onIncrement: () -> Unit,
     decrementEnabled: Boolean = true,
     incrementEnabled: Boolean = true,
+    valueColor: Color? = null,
 ) {
     val c = MonitorTheme.colors
     Row(
@@ -97,7 +99,7 @@ fun Stepper(
         Text(
             text = value,
             style = MonitorType.monoCaption.copy(fontSize = MonitorType.bodyLabel.fontSize),
-            color = c.text,
+            color = valueColor ?: c.text,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
             modifier = Modifier.width(64.dp).padding(horizontal = 8.dp),
         )

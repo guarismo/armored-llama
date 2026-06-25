@@ -16,24 +16,57 @@ class ArgsBuilderTest {
                 "--spec-draft-n-max", "4",
                 "--spec-draft-p-min", "0.6",
                 "--no-mmap",
+                "--flash-attn", "on",
+                "--cont-batching",
                 "--host", "0.0.0.0",
                 "--port", "8080",
-                "-c", "8192",
+                "-c", "32768",
                 "-t", "4",
-                "--tools", "all",
             ),
             args,
         )
     }
 
+    @Test fun buildArgs_emitsOptimizationFlagsFromConfig() {
+        // flash-attn off, continuous batching off, mlock on
+        val cfg = LlamaConfig(flashAttn = false, contBatch = false, mlock = true)
+        val args = buildArgs(cfg, "/b", "/m")
+        assertEquals(true, args.windowed(2).contains(listOf("--flash-attn", "off")))
+        assertEquals(true, args.contains("--no-cont-batching"))
+        assertEquals(false, args.contains("--cont-batching"))
+        assertEquals(true, args.contains("--mlock"))
+    }
+
+    @Test fun buildArgs_mlockOmittedByDefault() {
+        // default mlock = false → no --mlock flag
+        assertEquals(false, buildArgs(LlamaConfig(), "/b", "/m").contains("--mlock"))
+    }
+
+    @Test fun buildArgs_omitsMmprojWhenVisionDisabled() {
+        // Vision off → no --mmproj, but the filename is preserved in config and speculative stays on.
+        val args = buildArgs(LlamaConfig(useMmproj = false), "/b", "/m")
+        assertEquals(false, args.contains("--mmproj"))
+        assertEquals(true, args.contains("--model-draft"))
+        assertEquals(true, args.contains("--spec-type"))
+    }
+
+    @Test fun buildArgs_omitsDraftAndSpecWhenSpeculativeDisabled() {
+        // Speculative off → no --model-draft and no --spec-* flags, but --mmproj stays.
+        val args = buildArgs(LlamaConfig(useDraft = false), "/b", "/m")
+        assertEquals(false, args.contains("--model-draft"))
+        assertEquals(false, args.contains("--spec-type"))
+        assertEquals(false, args.contains("--spec-draft-n-max"))
+        assertEquals(true, args.contains("--mmproj"))
+    }
+
     @Test fun buildArgs_omitsEmptyOptionalFieldsAndAppendsExtraArgs() {
-        val cfg = LlamaConfig(draftFile = "", mmprojFile = "", specType = "", tools = "", noMmap = false, extraArgs = "--verbose --flash-attn")
+        val cfg = LlamaConfig(draftFile = "", mmprojFile = "", specType = "", noMmap = false, extraArgs = "--verbose --no-warmup")
         val args = buildArgs(cfg, "/b", "/m")
         assertEquals(false, args.contains("--model-draft"))
         assertEquals(false, args.contains("--mmproj"))
         assertEquals(false, args.contains("--spec-type"))
         assertEquals(false, args.contains("--tools"))
         assertEquals(false, args.contains("--no-mmap"))
-        assertEquals(listOf("--verbose", "--flash-attn"), args.takeLast(2))
+        assertEquals(listOf("--verbose", "--no-warmup"), args.takeLast(2))
     }
 }

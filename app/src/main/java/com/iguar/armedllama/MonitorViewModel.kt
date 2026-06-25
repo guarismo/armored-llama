@@ -6,10 +6,14 @@ import androidx.compose.runtime.setValue
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import android.os.Build
+import android.provider.Settings
 import com.iguar.armedllama.server.ConfigRepository
 import com.iguar.armedllama.server.LlamaServerService
 import com.iguar.armedllama.server.LogBus
 import com.iguar.armedllama.server.ModelDownloader
+import com.iguar.armedllama.server.isServerIdle
+import com.iguar.armedllama.server.parseThroughput
 import kotlinx.coroutines.flow.collect
 import com.iguar.armedllama.device.DeviceTelemetry
 import com.iguar.armedllama.model.CORE_COUNT
@@ -32,8 +36,8 @@ import kotlin.random.Random
  * Drives the dashboard. Server control ([toggleRunning]), model downloads ([downloadModel]) and the
  * log feed are wired to the real [com.iguar.armedllama.server.LlamaServerService],
  * [com.iguar.armedllama.server.ModelDownloader] and [com.iguar.armedllama.server.LogBus]. Device
- * telemetry (CPU %, memory, temperature, per-core MHz) is read live in [tick]; GPU and throughput
- * metrics there are still a mock random walk pending real sources.
+ * telemetry (CPU %, memory, temperature, per-core MHz) is read live in [tick]; throughput (tok/s and
+ * prompt-processing) is parsed from the server log via [LogBus].
  */
 class MonitorViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -56,23 +60,61 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
         // both read once at startup. Falls back to the mock defaults when sysfs is hidden.
         val coreCount = telemetry.coreCount().takeIf { it > 0 } ?: CORE_COUNT
         val cfg = configRepo.load()
+        val deviceName = runCatching {
+            Settings.Global.getString(app.contentResolver, "device_name")
+                .takeUnless { it.isNullOrBlank() }
+        }.getOrNull() ?: Build.MODEL
+        val modelName = cfg.modelFile.substringBeforeLast(".").takeUnless { it.isBlank() } ?: cfg.modelFile
         state = state.copy(
+            host = deviceName,
+            modelFile = modelName,
             metrics = state.metrics.copy(
                 cores = List(coreCount) { 600f },
                 maxCoreMhz = telemetry.maxCoreMhz() ?: state.metrics.maxCoreMhz,
             ),
-            settings = state.settings.copy(ctx = cfg.ctx, threads = cfg.threads, port = cfg.port),
+            settings = state.settings.copy(
+                ctx = cfg.ctx,
+                threads = cfg.threads,
+                port = cfg.port,
+                flashAttn = cfg.flashAttn,
+                contBatch = cfg.contBatch,
+                mlock = cfg.mlock,
+                useDraft = cfg.useDraft,
+                useMmproj = cfg.useMmproj,
+            ),
         )
         startTicker()
         // Real server logs replace the mock generator.
         viewModelScope.launch { LogBus.lines.collect { state = state.copy(logs = it) } }
-        // Reflect service status into UI running state.
+        // Reflect service status into UI running state; reset throughput when stopped.
         viewModelScope.launch {
             LlamaServerService.status.collect { s ->
+                val stopped = s == LlamaServerService.Status.STOPPED
                 state = state.copy(
                     serverStatus = s,
                     running = s == LlamaServerService.Status.RUNNING || s == LlamaServerService.Status.STARTING,
+                    metrics = if (stopped) state.metrics.copy(tps = 0f, pp = 0f) else state.metrics,
                 )
+            }
+        }
+        // Parse throughput from the uncapped raw log stream (#7). Collecting LogBus.lines (capped
+        // at LOG_CAP) would miss everything once the display buffer fills, which it does long before
+        // inference starts.
+        viewModelScope.launch {
+            LogBus.raw.collect { body ->
+                if (isServerIdle(body)) {
+                    // Request finished — zero the live readout instead of holding the last value.
+                    state = state.copy(metrics = state.metrics.copy(tps = 0f, pp = 0f))
+                } else {
+                    parseThroughput(body)?.let { r ->
+                        state = state.copy(
+                            metrics = state.metrics.copy(
+                                tps = r.tps ?: state.metrics.tps,
+                                pp = r.pp ?: state.metrics.pp,
+                            )
+                        )
+                    }
+                }
             }
         }
     }
@@ -92,7 +134,7 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
     /**
      * One sample. CPU %, per-core MHz, memory and temperature (WIRE THIS #3–5) come from real
      * `/proc` + `sysfs` reads via [telemetry]; each falls back to the mock random walk when the
-     * source is hidden (SELinux, emulator, offline core). GPU and throughput (#6–7) stay mock.
+     * source is hidden (SELinux, emulator, offline core). Throughput is set by the LogBus collector.
      */
     private fun tick() {
         val running = state.running
@@ -108,10 +150,6 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
             m.copy(
                 cpu = walk(m.cpu, 52f, 78f, 9f),
                 temp = walk(m.temp, 49f, 61f, 2.5f),
-                tps = walk(m.tps, 68f, 92f, 10f),
-                pp = walk(m.pp, 190f, 320f, 40f),
-                gpu = walk(m.gpu, 48f, 76f, 12f),
-                gpuMemUsed = walk(m.gpuMemUsed, 2.6f, 4.4f, 0.4f),
                 ramUsed = walk(m.ramUsed, 5200f, 5950f, 120f),
                 cores = m.cores.map { walk(it, 900f, 2900f, 700f) },
             )
@@ -119,10 +157,6 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
             m.copy(
                 cpu = ease(m.cpu, rnd(1f, 7f), 0.25f),
                 temp = ease(m.temp, rnd(31f, 35f), 0.25f),
-                tps = ease(m.tps, 0f, 0.5f),
-                pp = ease(m.pp, 0f, 0.5f),
-                gpu = ease(m.gpu, 0f, 0.4f),
-                gpuMemUsed = ease(m.gpuMemUsed, 0.4f, 0.3f),
                 ramUsed = ease(m.ramUsed, 3000f, 0.2f),
                 cores = m.cores.map { ease(it, rnd(440f, 820f), 0.3f) },
             )
@@ -135,6 +169,9 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
             ramUsed = memReal?.usedMb ?: mock.ramUsed,
             ramTotal = memReal?.totalMb ?: mock.ramTotal,
             cores = coresReal ?: mock.cores,
+            // Throughput (tps/pp) is updated via the LogBus collector; tick() preserves current values.
+            tps = state.metrics.tps,
+            pp = state.metrics.pp,
         )
 
         val h = state.histories
@@ -154,7 +191,15 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
 
     fun toggleRunning() {
         val ctx = getApplication<Application>()
-        if (state.running) LlamaServerService.stop(ctx) else LlamaServerService.start(ctx)
+        if (state.running) {
+            LlamaServerService.stop(ctx)
+        } else {
+            // Flush settings synchronously first: updateSettings persists on a background dispatcher,
+            // and the service reads config.ini at launch — without this, a quick Start can race the
+            // pending write and boot with the previous settings (e.g. an old context size).
+            persistSettings(state.settings)
+            LlamaServerService.start(ctx)
+        }
     }
 
     fun openMenu() { state = state.copy(panel = Panel.MENU) }
@@ -162,18 +207,27 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
     fun navigate(panel: Panel) { state = state.copy(panel = panel) }
     fun backToMenu() { state = state.copy(panel = Panel.MENU) }
 
-    // Settings (persists ctx/threads/port to config.ini) --------------------------------------
+    // Settings (persists to config.ini) -------------------------------------------------------
     fun updateSettings(transform: (ServerSettings) -> ServerSettings) {
         val newSettings = transform(state.settings)
         state = state.copy(settings = newSettings)
-        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            val cfg = configRepo.load().copy(
-                ctx = newSettings.ctx,
-                threads = newSettings.threads,
-                port = newSettings.port,
-            )
-            configRepo.save(cfg)
-        }
+        // Rapid stepper taps persist off the main thread; the start path re-flushes synchronously.
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) { persistSettings(newSettings) }
+    }
+
+    /** Merge [settings] into config.ini and write it. Synchronous — callers choose the thread. */
+    private fun persistSettings(settings: ServerSettings) {
+        val cfg = configRepo.load().copy(
+            ctx = settings.ctx,
+            threads = settings.threads,
+            port = settings.port,
+            flashAttn = settings.flashAttn,
+            contBatch = settings.contBatch,
+            mlock = settings.mlock,
+            useDraft = settings.useDraft,
+            useMmproj = settings.useMmproj,
+        )
+        configRepo.save(cfg)
     }
 
     // Update llama.cpp (WIRE THIS #9) ----------------------------------------------------------
