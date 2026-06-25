@@ -52,7 +52,9 @@ fun TopBar(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        // weight(1f) lets the title block grow into leftover space so the button always
+        // gets its natural width and "START"/"STOP" never wraps to one letter per line.
+        Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
             // Hamburger 38x38, r=11, hairline border, panel bg
             Box(
                 modifier = Modifier
@@ -116,6 +118,8 @@ private fun StartStopButton(running: Boolean, onToggle: () -> Unit) {
             text = if (running) "STOP" else "START",
             style = MonitorType.button,
             color = onColor(color),
+            maxLines = 1,
+            softWrap = false,
         )
     }
 }
