@@ -6,7 +6,6 @@ import android.app.NotificationManager
 import android.app.Service
 import android.content.Context
 import android.content.Intent
-import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
@@ -107,12 +106,8 @@ class LlamaServerService : Service() {
         runCatching { waitFor(3, java.util.concurrent.TimeUnit.SECONDS) }.getOrDefault(false)
 
     private fun startForegroundCompat(text: String) {
-        val notif = buildNotification(text)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
-        } else {
-            startForeground(NOTIF_ID, notif)
-        }
+        // targetSdk 28: FGS types are not enforced, so the plain 2-arg form is correct.
+        startForeground(NOTIF_ID, buildNotification(text))
     }
 
     @Suppress("DEPRECATION")
