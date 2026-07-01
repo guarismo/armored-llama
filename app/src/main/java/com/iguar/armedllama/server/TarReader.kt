@@ -22,7 +22,7 @@ fun readTar(input: InputStream): List<TarEntry> {
         if (size > 0 && !readFully(input, data)) error("truncated tar entry: $name")
         val pad = ((512 - (size % 512)) % 512).toInt()
         if (pad > 0) skipFully(input, pad)
-        if (typeflag == '0' || typeflag == ' ') out.add(TarEntry(name, data))
+        if (typeflag == '0' || typeflag == ' ' || typeflag.code == 0) out.add(TarEntry(name, data))
     }
     return out
 }

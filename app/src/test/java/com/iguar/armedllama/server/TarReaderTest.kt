@@ -44,4 +44,11 @@ class TarReaderTest {
     @Test fun readTar_emptyArchiveYieldsNoEntries() {
         assertEquals(0, readTar(ByteArrayInputStream(ByteArray(1024))).size)
     }
+
+    @Test fun readTar_handlesExactBlockMultipleSize() {
+        val data = ByteArray(1024) { (it % 13).toByte() } // exactly two 512-byte blocks, zero padding
+        val entries = readTar(java.io.ByteArrayInputStream(tarOf("libexact.so" to data)))
+        assertEquals(1, entries.size)
+        assertArrayEquals(data, entries[0].bytes)
+    }
 }
