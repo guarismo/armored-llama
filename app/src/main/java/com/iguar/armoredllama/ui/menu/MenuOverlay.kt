@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Settings
@@ -38,6 +39,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import com.iguar.armoredllama.model.MonitorUiState
 import com.iguar.armoredllama.model.Panel
+import com.iguar.armoredllama.server.LlamaServerService
+import com.iguar.armoredllama.ui.chat.ChatPanel
 import com.iguar.armoredllama.ui.components.panel
 import com.iguar.armoredllama.ui.theme.MonitorTheme
 import com.iguar.armoredllama.ui.theme.MonitorType
@@ -75,6 +78,9 @@ fun MenuOverlay(
     }
 
     // Full-screen sub-panels
+    FullScreenPanel(visible = state.panel == Panel.CHAT) {
+        ChatPanel(state, onBack)
+    }
     FullScreenPanel(visible = state.panel == Panel.SETTINGS) {
         SettingsPanel(state, onBack, callbacks)
     }
@@ -137,6 +143,13 @@ private fun DrawerContent(state: MonitorUiState, onNavigate: (Panel) -> Unit) {
             }
             Spacer(Modifier.height(20.dp))
 
+            val chatReady = state.serverStatus == LlamaServerService.Status.RUNNING
+            DrawerRow(
+                Icons.AutoMirrored.Filled.Chat,
+                "Chat",
+                if (chatReady) "Talk to the running model" else "start the server first",
+                enabled = chatReady,
+            ) { onNavigate(Panel.CHAT) }
             DrawerRow(Icons.Filled.Settings, "Settings", "Context, threads, optimizations") { onNavigate(Panel.SETTINGS) }
             DrawerRow(Icons.Filled.Download, "Update llama.cpp", "Check and install latest release") { onNavigate(Panel.RELEASE) }
             DrawerRow(null, "Download model 🤗", "Browse GGUF on Hugging Face") { onNavigate(Panel.HF) }
@@ -154,14 +167,17 @@ private fun DrawerRow(
     title: String,
     subtitle: String,
     badge: String? = null,
+    enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
     val c = MonitorTheme.colors
+    val iconTint = if (enabled) c.accent else c.muted
+    val titleColor = if (enabled) c.text else c.muted
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .clickable(onClick = onClick)
+            .clickable(enabled = enabled, onClick = onClick)
             .padding(vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -173,7 +189,7 @@ private fun DrawerRow(
             contentAlignment = Alignment.Center,
         ) {
             if (icon != null) {
-                Icon(icon, contentDescription = null, tint = c.accent, modifier = Modifier.size(18.dp))
+                Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(18.dp))
             } else {
                 Text("🤗", style = MonitorType.bodyLabel)
             }
@@ -181,7 +197,7 @@ private fun DrawerRow(
         Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(title, style = MonitorType.bodyLabel, color = c.text)
+                Text(title, style = MonitorType.bodyLabel, color = titleColor)
                 if (badge != null) {
                     Spacer(Modifier.width(8.dp))
                     Box(
