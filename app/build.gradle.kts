@@ -8,7 +8,7 @@ plugins {
 }
 
 android {
-    namespace = "com.iguar.armedllama"
+    namespace = "com.iguar.armoredllama"
     compileSdk {
         version = release(36) {
             minorApiLevel = 1
@@ -16,9 +16,9 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.iguar.armedllama"
+        applicationId = "com.iguar.armoredllama"
         minSdk = 26
-        targetSdk = 36
+        targetSdk = 28
         versionCode = 1
         versionName = "1.0"
 
@@ -117,6 +117,7 @@ dependencies {
     debugImplementation(libs.androidx.ui.tooling)
 
     testImplementation(libs.junit)
+    testImplementation("org.json:json:20240303")
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.junit)
 }

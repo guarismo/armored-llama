@@ -1,13 +1,12 @@
 # Design: Download models + run a bundled llama-server (INI config, live logs)
 
 **Date:** 2026-06-23
-**Status:** Approved (brainstorming) — pending implementation plan
+**Status:** Implemented; kept as the original design record
 **Component area:** `app/.../server/`, `MonitorViewModel`, manifest + build config
 
 ## 1. Summary
 
-Replace the mock process/log/download seams (WIRE THIS #1, #2, #8, #9→repurposed, #10→scoped)
-with a real pipeline that:
+Replace the mock process/log/download surfaces with a real pipeline that:
 
 1. **Bundles** an arm64 `llama-server` binary in the APK and executes it from the
    (read-only, executable) native-lib dir — works on **non-rooted** stock devices.
@@ -29,10 +28,14 @@ flags (they have confirmed one works).
   across restarts.
 - Live server logs in the log window; also tee'd to a rolling file.
 
-**Non-goals (kept as-is / mock / deferred)**
-- Generic Hugging Face search UI (#10 search).
-- GitHub binary auto-update / download of the binary itself (#9) — the binary is bundled.
-- GPU telemetry (#6) and throughput parsing (#7).
+**Original non-goals, later resolved**
+- Generic Hugging Face search UI is now implemented for GGUF model search.
+- GitHub binary auto-update / download is now implemented as a targetSdk-28 updater with bundled
+  fallback.
+- Throughput parsing is now implemented from live server logs.
+- GPU telemetry was removed because the bundled llama.cpp build is CPU-only.
+
+**Still out of scope**
 - Multi-profile INI (single active config only).
 - Building llama.cpp from source (user provides the `.so`).
 
@@ -47,7 +50,7 @@ flags (they have confirmed one works).
   `libllamaserver.so`) into `app/src/main/jniLibs/arm64-v8a/` (git-ignored, re-fetchable). The service
   execs with `LD_LIBRARY_PATH=nativeLibraryDir` so the shared-lib deps resolve.
 - **Model storage:** app-specific external dir `getExternalFilesDir("models")`
-  (`Android/data/com.iguar.armedllama/files/models`) — no runtime permission, user-visible in a file
+  (`Android/data/com.iguar.armoredllama/files/models`) — no runtime permission, user-visible in a file
   manager, large enough for ~3.2 GB.
 - **Single INI** at `getExternalFilesDir(null)/config.ini`, seeded on first run.
 - **Flags carried verbatim** even if a given binary would reject them; acceptance/errors surface live
@@ -169,10 +172,19 @@ tests `IniStoreTest`, `ArgsBuilderTest`, `ModelDownloaderTest`;
 **Modified:** `MonitorViewModel.kt`, `model/MonitorState.kt` (status + download/config state),
 `ui/menu/SubPanels.kt` (download + settings wiring), `AndroidManifest.xml`, `app/build.gradle.kts`.
 
-## 11. Risks / open items
+## 11. Implementation status
+
+- Implemented server config, argument building, foreground service execution, live log streaming, and
+  resumable HF model downloads.
+- Implemented real GGUF model search against the Hugging Face API; blank search still shows the
+  current configured model.
+- Implemented GitHub Releases-based llama.cpp updater in the later `2026-06-24` design, including
+  app-storage runtime install, active tag tracking, bundled fallback, and runtime removal UX.
+- Verified with `:app:assembleDebug`, `:app:testDebugUnitTest`, and device smoke checks.
+
+## 12. Risks / open items
 
 - The `gemma-4` arch / `--spec-type draft-mtp` support depends on the bundled build (b9775). User has
   tested this release with these flags; any rejection/load error surfaces live in the logs regardless.
 - Large downloads (~3.2 GB) on metered networks — out of scope to gate; resumable.
 - `useLegacyPackaging=true` slightly enlarges the APK (binary stored uncompressed-on-disk at runtime).
-- Repo is **not** a git repository yet, so this spec is written but not committed.

@@ -22,5 +22,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Armed Llama"
+rootProject.name = "Armored Llama"
 include(":app")

@@ -1,13 +1,13 @@
 # Design: #9 — Real in-app llama.cpp binary updater (targetSdk-28 approach)
 
 **Date:** 2026-06-24
-**Status:** Approved (brainstorming) — pending implementation plan
+**Status:** Implemented; kept as the original design record
 **Component area:** `app/.../server/`, `LlamaServerService`, `MonitorViewModel`, `SubPanels`,
 `AndroidManifest.xml`, `app/build.gradle.kts`
 
 ## 1. Summary
 
-Replace the mock "Update llama.cpp" screen (WIRE THIS #9) with a **real** self-updater that downloads
+Replace the mock "Update llama.cpp" screen with a **real** self-updater that downloads
 the latest `ggml-org/llama.cpp` android-arm64 release and runs it — on a **non-rooted** device.
 
 The enabling decision: **drop `targetSdkVersion` to 28**. Android's write-xor-execute rule and the
@@ -158,12 +158,23 @@ incompatible release can never leave the app unable to run anything (Approach 1 
 **Modified:** `server/LlamaServerService.kt`, `MonitorViewModel.kt`, `model/MonitorState.kt`,
 `ui/menu/SubPanels.kt` (ReleasePanel), `AndroidManifest.xml`, `app/build.gradle.kts`.
 
-## 10. Risks / open items
+## 10. Implementation status
+
+- Implemented `GithubReleases`, `UpdateDownloader`, and `RuntimeBinaries`.
+- `LlamaServerService` now runs `RuntimeBinaries.activeExecutable()`, so downloaded active runtimes
+  win and the bundled `b9775` runtime remains the fallback.
+- The Update panel supports check, download/install, active tag display, and removing downloaded
+  runtimes to return to the bundled fallback.
+- Verified on-device with downloaded active tag `b9859`; the server exec path pointed at
+  `files/llama/b9859/llama-server`.
+
+## 11. Risks / open items
 
 - **targetSdk-28 regression.** The app permanently runs in Android-9 compatibility mode. Acceptable for
   a sideloaded personal app; not for Play Store (out of scope). No functional regression identified
   beyond the FGS/permission simplifications in §4.
-- **Spike is a hard gate.** If exec-from-`filesDir` is denied on the device, the feature is dropped.
+- **Device policy dependency.** The on-device spike passed for the tested phone; other OEM builds may
+  still restrict exec-from-`filesDir`.
 - **Storage.** Bundled (~tens of MB) + one downloaded version. Old downloaded versions are pruned.
 - **Bundled-tag drift.** `RuntimeBinaries.BUNDLED_TAG` must track `llamaRelease` in build.gradle.kts
   (both currently `b9775`); noted as a maintenance coupling.
