@@ -14,7 +14,7 @@
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.ArmedLlama">
+        android:theme="@style/Theme.ArmoredLlama">
 
         <service
             android:name=".server.LlamaServerService"
@@ -24,7 +24,7 @@
             android:name=".MainActivity"
             android:exported="true"
             android:label="@string/app_name"
-            android:theme="@style/Theme.ArmedLlama">
+            android:theme="@style/Theme.ArmoredLlama">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

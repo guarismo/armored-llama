@@ -8,7 +8,7 @@ plugins {
 }
 
 android {
-    namespace = "com.iguar.armedllama"
+    namespace = "com.iguar.armoredllama"
     compileSdk {
         version = release(36) {
             minorApiLevel = 1
@@ -16,7 +16,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.iguar.armedllama"
+        applicationId = "com.iguar.armoredllama"
         minSdk = 26
         targetSdk = 28
         versionCode = 1

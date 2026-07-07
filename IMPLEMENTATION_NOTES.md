@@ -1,4 +1,4 @@
-# Armed Llama — implementation notes
+# Armored Llama — implementation notes
 
 Native **Kotlin + Jetpack Compose** build of the `llama.cpp` Android monitor, recreated from the
 design handoff (`Android app monitoring tool (3).zip → design_handoff_llamacpp_monitor/`).
@@ -8,15 +8,14 @@ Layouts B and C were alternatives and are not built.
 
 ## Status
 Everything visible matches the hi-fi spec (dark + light tokens, typography, radii, the drawer and
-all three sub-screens). **Device telemetry — CPU %, per-core MHz, memory and temperature (WIRE THIS
-#3–5) — now reads real `/proc` + `sysfs` data**, with the eased random walk kept as a per-band
-fallback when a source is hidden (SELinux, emulator, offline core). The core grid is sized to the
-real CPU and bars scale by `cpuinfo_max_freq`. **The server now really runs**: Start/Stop launch a
-bundled `llama-server` via a foreground service, its real logs stream into the feed, and the gemma-4
-model downloads from Hugging Face. **Throughput (tok/s + prompt-processing) is parsed live from the
-server log and shown as two stat tiles, and the Settings flags now reach the launch.** GPU telemetry
-was dropped (the bundled build is CPU-only). The llama.cpp self-update (#9) remains mock. See the
-"WIRE THIS" list below.
+all three sub-screens). **Device telemetry — CPU %, per-core MHz, memory and temperature — now reads
+real `/proc` + `sysfs` data**, with the eased random walk kept as a per-band fallback when a source is
+hidden (SELinux, emulator, offline core). The core grid is sized to the real CPU and bars scale by
+`cpuinfo_max_freq`. **The server now really runs**: Start/Stop launch a bundled or downloaded
+`llama-server` via a foreground service, real logs stream into the feed, and model files download from
+Hugging Face. **Throughput (tok/s + prompt-processing) is parsed live from the server log and shown as
+two stat tiles, and the Settings flags now reach the launch.** GPU telemetry was dropped because the
+bundled build is CPU-only.
 
 The real reads live in `device/`: pure parsers in `ProcParsers.kt` and IO in `DeviceTelemetry.kt`
 (over a `FileSource` seam so the logic is unit-tested without a device). The server runtime lives in
@@ -44,7 +43,7 @@ real telemetry over mock; logs/status come from the service.
 | Settings / Update / HF panels | `ui/menu/SubPanels.kt` |
 | Root composition | `ui/MonitorScreen.kt`, `MainActivity.kt` |
 
-## ⚠️ WIRE THIS — mock → real, with the seam to replace
+## Wiring Status
 1. ✅ **Process control** — done. `MonitorViewModel.toggleRunning()` starts/stops
    `server/LlamaServerService` (foreground, declared in the manifest), which execs the bundled
    `libllamaserver.so` from `nativeLibraryDir` with `LD_LIBRARY_PATH` set.
@@ -64,17 +63,23 @@ real telemetry over mock; logs/status come from the service.
    `eval time` snapshots) off `LogBus.raw` (uncapped); zeroed on `all slots are idle` and on stop.
    The dashboard shows two tiles: **TOK/S** (generation) and **PP** (prompt processing).
 8. ◐ **Settings → launch flags** — done for the exposed controls. `updateSettings` persists
-   `ctx/threads/port` + `flash_attn/cont_batching/mlock` to `config.ini`, seeded back on startup and
-   applied at launch via `server/ArgsBuilder` (`--flash-attn on|off`, `--cont-batching`/
-   `--no-cont-batching`, `--mlock`). GPU-layers control removed (CPU-only build). Changes apply on
-   the next Stop→Start (argv is built at process launch). Still TODO: surface the model flags
-   (mmproj/draft/spec) in the UI, and move the `config.ini` write off the main thread.
-9. **Update llama.cpp** — `MonitorViewModel.startDeploy()`; GitHub Releases API for
-   `ggml-org/llama.cpp`, download `android-arm64`, install, restart. (Still mock; the runtime binary
-   is currently bundled at build time — see Build below.)
-10. ◐ **Download model** — wired for the gemma-4 model. `MonitorViewModel.downloadModel()` pulls the
-    configured GGUF files (model/draft/mmproj) from Hugging Face via `server/ModelDownloader`
-    (resumable) into app storage; "Installed" = present on disk. Generic HF search UI still TODO.
+   `ctx/threads/port` + `flash_attn/cont_batching/mlock/useDraft/useMmproj` to `config.ini`, seeded
+   back on startup and applied at launch via `server/ArgsBuilder` (`--flash-attn on|off`,
+   `--cont-batching`/`--no-cont-batching`, `--mlock`, `--model-draft`, `--mmproj`). GPU-layers
+   control removed (CPU-only build). Changes apply on the next Stop→Start (argv is built at process
+   launch); Start flushes settings synchronously to avoid racing the service config read.
+9. ✅ **Update llama.cpp** — done. `MonitorViewModel.checkForUpdate()` reads GitHub Releases for
+   `ggml-org/llama.cpp`; `downloadUpdate()` downloads the android-arm64 tarball, `RuntimeBinaries`
+   extracts `llama-server` plus `*.so` into `filesDir/llama/<tag>/`, records it active, and prunes
+   older downloaded versions. `LlamaServerService` runs `RuntimeBinaries.activeExecutable()`, so a
+   downloaded active binary wins and a missing/invalid install falls back to bundled `b9775`. The
+   Update panel also exposes "Remove downloaded runtime" to clear app-storage runtimes and return to
+   the bundled fallback.
+10. ✅ **Download model** — done. The HF panel shows the configured model when search is blank, and
+    calls the Hugging Face API for GGUF search queries. Results resolve each repo to a primary `.gguf`
+    file, show repo/file/quant/size where available, and `Get` updates `config.ini` before downloading
+    via `server/ModelDownloader` (resumable). Generic search results are text-only by default; the
+    curated Gemma profile keeps its draft/mmproj companion files.
 
 ## Build
 Open in Android Studio (the project uses AGP 9.2.1 + the block `compileSdk { … }` DSL). The Compose
@@ -91,8 +96,11 @@ The `fetchLlamaServer` Gradle task (in `app/build.gradle.kts`, run automatically
 downloads llama.cpp release **b9775** android-arm64 and stages all its `*.so` plus the `llama-server`
 executable (renamed `libllamaserver.so`) into `app/src/main/jniLibs/arm64-v8a/`. These are
 **git-ignored** and re-fetched on a clean checkout. Because that build is dynamically linked, the
-service runs it with `LD_LIBRARY_PATH = nativeLibraryDir`. To pin a different build, change
-`llamaRelease` in `app/build.gradle.kts`. **Note:** the experimental flags in the seeded `config.ini`
+service uses it as the fallback runtime when no downloaded active binary is installed. Downloaded
+updates live under app storage (`filesDir/llama/<tag>/`) and run with `LD_LIBRARY_PATH` pointed at
+that version directory. To pin a different bundled build, change `llamaRelease` in
+`app/build.gradle.kts` and keep `RuntimeBinaries.BUNDLED_TAG` in sync. **Note:** the experimental
+flags in the seeded `config.ini`
 (`--spec-type draft-mtp`, `--spec-draft-*`, `--tools all`) require a build that supports them; the
 server's own acceptance/errors show up live in the log window.
 

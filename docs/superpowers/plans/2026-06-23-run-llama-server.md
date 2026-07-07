@@ -8,9 +8,16 @@
 
 **Tech Stack:** Kotlin, Jetpack Compose, AndroidX Lifecycle, Kotlin coroutines/Flow, `java.net.HttpURLConnection` (no new network dep), Android foreground Service, JUnit4 (host-JVM unit tests via Gradle).
 
+## Current Status
+
+Implemented. Start/Stop now controls `LlamaServerService`, logs stream through `LogBus`, settings
+persist to `config.ini`, model downloads are resumable, and the HF panel now performs real GGUF search
+against the Hugging Face API. The later binary-updater plan added GitHub Releases runtime updates and
+bundled fallback handling.
+
 ## Global Constraints
 
-- Package root: `com.iguar.armedllama`; new code under `com.iguar.armedllama.server`.
+- Package root: `com.iguar.armoredllama`; new code under `com.iguar.armoredllama.server`.
 - minSdk 26, targetSdk 36, AGP 9 built-in Kotlin (no `kotlin.android` plugin), `jvmTarget = JVM_11`.
 - Non-root: execute the binary from `applicationInfo.nativeLibraryDir` only. Requires `useLegacyPackaging = true` and `android:extractNativeLibs="true"`.
 - Binary: mainline llama.cpp release **`b9775`** android-arm64
@@ -23,7 +30,7 @@
 - HF repo: `unsloth/gemma-4-E2B-it-qat-mobile-GGUF`; files `gemma-4-E2B-it-qat-UD-Q2_K_XL.gguf` (model), `mtp-gemma-4-E2B-it.gguf` (draft), `mmproj-F16.gguf` (mmproj).
 - Default flags verbatim: `--spec-type draft-mtp --spec-draft-n-max 4 --spec-draft-p-min 0.6 --no-mmap --host 0.0.0.0 --port 8080 -c 8192 -t 4 --tools all`.
 - Unit-test command (Windows, Git Bash or PowerShell): use the absolute wrapper path, e.g.
-  `& "C:\Users\iguar\Code\ArmedLlama\gradlew.bat" -p "C:\Users\iguar\Code\ArmedLlama" :app:testDebugUnitTest --tests "<FQCN>"`.
+  `& "C:\Users\iguar\Code\ArmoredLlama\gradlew.bat" -p "C:\Users\iguar\Code\ArmoredLlama" :app:testDebugUnitTest --tests "<FQCN>"`.
 - Compile/verify command: `... :app:assembleDebug` (expect `BUILD SUCCESSFUL`).
 
 ---
@@ -37,7 +44,7 @@
 - [ ] **Step 1: Init and baseline commit**
 
 ```bash
-cd /c/Users/iguar/Code/ArmedLlama
+cd /c/Users/iguar/Code/ArmoredLlama
 git init
 printf '\n# build harness\n/build/tdd-out/\n' >> .gitignore
 git add -A
@@ -49,9 +56,9 @@ git commit -m "chore: baseline before llama-server runtime work"
 ### Task 1: `LlamaConfig` + INI parse/write/map (pure)
 
 **Files:**
-- Create: `app/src/main/java/com/iguar/armedllama/server/LlamaConfig.kt`
-- Create: `app/src/main/java/com/iguar/armedllama/server/IniStore.kt`
-- Test: `app/src/test/java/com/iguar/armedllama/server/IniStoreTest.kt`
+- Create: `app/src/main/java/com/iguar/armoredllama/server/LlamaConfig.kt`
+- Create: `app/src/main/java/com/iguar/armoredllama/server/IniStore.kt`
+- Test: `app/src/test/java/com/iguar/armoredllama/server/IniStoreTest.kt`
 
 **Interfaces:**
 - Produces: `data class LlamaConfig(...)` (fields below); `fun parseIni(text:String): Map<String,Map<String,String>>`; `fun writeIni(data: Map<String,Map<String,String>>): String`; `fun LlamaConfig.toIni(): String`; `fun llamaConfigFromIni(text:String): LlamaConfig`.
@@ -59,7 +66,7 @@ git commit -m "chore: baseline before llama-server runtime work"
 - [ ] **Step 1: Write the failing test**
 
 ```kotlin
-package com.iguar.armedllama.server
+package com.iguar.armoredllama.server
 
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -98,13 +105,13 @@ class IniStoreTest {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `& "C:\Users\iguar\Code\ArmedLlama\gradlew.bat" -p "C:\Users\iguar\Code\ArmedLlama" :app:testDebugUnitTest --tests "com.iguar.armedllama.server.IniStoreTest"`
+Run: `& "C:\Users\iguar\Code\ArmoredLlama\gradlew.bat" -p "C:\Users\iguar\Code\ArmoredLlama" :app:testDebugUnitTest --tests "com.iguar.armoredllama.server.IniStoreTest"`
 Expected: FAIL — unresolved references `parseIni`, `LlamaConfig`, etc.
 
 - [ ] **Step 3: Write `LlamaConfig.kt`**
 
 ```kotlin
-package com.iguar.armedllama.server
+package com.iguar.armoredllama.server
 
 /** Full llama-server launch configuration, persisted as config.ini. Pure (no Android deps). */
 data class LlamaConfig(
@@ -128,7 +135,7 @@ data class LlamaConfig(
 - [ ] **Step 4: Write `IniStore.kt`**
 
 ```kotlin
-package com.iguar.armedllama.server
+package com.iguar.armoredllama.server
 
 /** Minimal INI parse/write + LlamaConfig mapping. Pure; unit-tested on the host JVM. */
 
@@ -219,7 +226,7 @@ Run: same command as Step 2. Expected: PASS (3 tests).
 - [ ] **Step 6: Commit**
 
 ```bash
-git add app/src/main/java/com/iguar/armedllama/server/LlamaConfig.kt app/src/main/java/com/iguar/armedllama/server/IniStore.kt app/src/test/java/com/iguar/armedllama/server/IniStoreTest.kt
+git add app/src/main/java/com/iguar/armoredllama/server/LlamaConfig.kt app/src/main/java/com/iguar/armoredllama/server/IniStore.kt app/src/test/java/com/iguar/armoredllama/server/IniStoreTest.kt
 git commit -m "feat(server): LlamaConfig + INI parse/write round-trip"
 ```
 
@@ -228,8 +235,8 @@ git commit -m "feat(server): LlamaConfig + INI parse/write round-trip"
 ### Task 2: `ArgsBuilder` (pure)
 
 **Files:**
-- Create: `app/src/main/java/com/iguar/armedllama/server/ArgsBuilder.kt`
-- Test: `app/src/test/java/com/iguar/armedllama/server/ArgsBuilderTest.kt`
+- Create: `app/src/main/java/com/iguar/armoredllama/server/ArgsBuilder.kt`
+- Test: `app/src/test/java/com/iguar/armoredllama/server/ArgsBuilderTest.kt`
 
 **Interfaces:**
 - Consumes: `LlamaConfig` (Task 1).
@@ -238,7 +245,7 @@ git commit -m "feat(server): LlamaConfig + INI parse/write round-trip"
 - [ ] **Step 1: Write the failing test**
 
 ```kotlin
-package com.iguar.armedllama.server
+package com.iguar.armoredllama.server
 
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -281,13 +288,13 @@ class ArgsBuilderTest {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `& "C:\Users\iguar\Code\ArmedLlama\gradlew.bat" -p "C:\Users\iguar\Code\ArmedLlama" :app:testDebugUnitTest --tests "com.iguar.armedllama.server.ArgsBuilderTest"`
+Run: `& "C:\Users\iguar\Code\ArmoredLlama\gradlew.bat" -p "C:\Users\iguar\Code\ArmoredLlama" :app:testDebugUnitTest --tests "com.iguar.armoredllama.server.ArgsBuilderTest"`
 Expected: FAIL — unresolved `buildArgs`.
 
 - [ ] **Step 3: Write `ArgsBuilder.kt`**
 
 ```kotlin
-package com.iguar.armedllama.server
+package com.iguar.armoredllama.server
 
 /** Turn a [LlamaConfig] into the llama-server argv. Pure; flags omitted when their field is blank. */
 fun buildArgs(config: LlamaConfig, binaryPath: String, modelsDir: String): List<String> {
@@ -319,7 +326,7 @@ Run: same as Step 2. Expected: PASS (2 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add app/src/main/java/com/iguar/armedllama/server/ArgsBuilder.kt app/src/test/java/com/iguar/armedllama/server/ArgsBuilderTest.kt
+git add app/src/main/java/com/iguar/armoredllama/server/ArgsBuilder.kt app/src/test/java/com/iguar/armoredllama/server/ArgsBuilderTest.kt
 git commit -m "feat(server): build llama-server argv from config"
 ```
 
@@ -328,8 +335,8 @@ git commit -m "feat(server): build llama-server argv from config"
 ### Task 3: Download URL + resume math (pure)
 
 **Files:**
-- Create: `app/src/main/java/com/iguar/armedllama/server/DownloadMath.kt`
-- Test: `app/src/test/java/com/iguar/armedllama/server/DownloadMathTest.kt`
+- Create: `app/src/main/java/com/iguar/armoredllama/server/DownloadMath.kt`
+- Test: `app/src/test/java/com/iguar/armoredllama/server/DownloadMathTest.kt`
 
 **Interfaces:**
 - Produces: `fun hfUrl(repo:String, file:String): String`; `fun resumeOffset(existingBytes:Long, totalBytes:Long): Long?`; `fun isComplete(existingBytes:Long, totalBytes:Long): Boolean`.
@@ -337,7 +344,7 @@ git commit -m "feat(server): build llama-server argv from config"
 - [ ] **Step 1: Write the failing test**
 
 ```kotlin
-package com.iguar.armedllama.server
+package com.iguar.armoredllama.server
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -363,13 +370,13 @@ class DownloadMathTest {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `& "C:\Users\iguar\Code\ArmedLlama\gradlew.bat" -p "C:\Users\iguar\Code\ArmedLlama" :app:testDebugUnitTest --tests "com.iguar.armedllama.server.DownloadMathTest"`
+Run: `& "C:\Users\iguar\Code\ArmoredLlama\gradlew.bat" -p "C:\Users\iguar\Code\ArmoredLlama" :app:testDebugUnitTest --tests "com.iguar.armoredllama.server.DownloadMathTest"`
 Expected: FAIL — unresolved `hfUrl`, etc.
 
 - [ ] **Step 3: Write `DownloadMath.kt`**
 
 ```kotlin
-package com.iguar.armedllama.server
+package com.iguar.armoredllama.server
 
 /** Pure helpers for resumable Hugging Face downloads. */
 
@@ -394,7 +401,7 @@ Run: same as Step 2. Expected: PASS (6 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add app/src/main/java/com/iguar/armedllama/server/DownloadMath.kt app/src/test/java/com/iguar/armedllama/server/DownloadMathTest.kt
+git add app/src/main/java/com/iguar/armoredllama/server/DownloadMath.kt app/src/test/java/com/iguar/armoredllama/server/DownloadMathTest.kt
 git commit -m "feat(server): HF url + resume math"
 ```
 
@@ -403,8 +410,8 @@ git commit -m "feat(server): HF url + resume math"
 ### Task 4: `ConfigRepository` + `ModelDownloader` IO (Android glue)
 
 **Files:**
-- Create: `app/src/main/java/com/iguar/armedllama/server/ConfigRepository.kt`
-- Create: `app/src/main/java/com/iguar/armedllama/server/ModelDownloader.kt`
+- Create: `app/src/main/java/com/iguar/armoredllama/server/ConfigRepository.kt`
+- Create: `app/src/main/java/com/iguar/armoredllama/server/ModelDownloader.kt`
 
 **Interfaces:**
 - Consumes: `LlamaConfig`, `llamaConfigFromIni`, `toIni` (Task 1); `hfUrl`, `isComplete` (Task 3).
@@ -415,7 +422,7 @@ git commit -m "feat(server): HF url + resume math"
 - [ ] **Step 1: Write `ConfigRepository.kt`**
 
 ```kotlin
-package com.iguar.armedllama.server
+package com.iguar.armoredllama.server
 
 import android.content.Context
 import java.io.File
@@ -449,7 +456,7 @@ class ConfigRepository(private val context: Context) {
 - [ ] **Step 2: Write `ModelDownloader.kt`**
 
 ```kotlin
-package com.iguar.armedllama.server
+package com.iguar.armoredllama.server
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -503,13 +510,13 @@ class ModelDownloader(private val modelsDir: File) {
 
 - [ ] **Step 3: Verify it compiles**
 
-Run: `& "C:\Users\iguar\Code\ArmedLlama\gradlew.bat" -p "C:\Users\iguar\Code\ArmedLlama" :app:compileDebugKotlin`
+Run: `& "C:\Users\iguar\Code\ArmoredLlama\gradlew.bat" -p "C:\Users\iguar\Code\ArmoredLlama" :app:compileDebugKotlin`
 Expected: `BUILD SUCCESSFUL`.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add app/src/main/java/com/iguar/armedllama/server/ConfigRepository.kt app/src/main/java/com/iguar/armedllama/server/ModelDownloader.kt
+git add app/src/main/java/com/iguar/armoredllama/server/ConfigRepository.kt app/src/main/java/com/iguar/armoredllama/server/ModelDownloader.kt
 git commit -m "feat(server): config repository + resumable model downloader"
 ```
 
@@ -518,19 +525,19 @@ git commit -m "feat(server): config repository + resumable model downloader"
 ### Task 5: `LogBus` (process-wide live log stream)
 
 **Files:**
-- Create: `app/src/main/java/com/iguar/armedllama/server/LogBus.kt`
+- Create: `app/src/main/java/com/iguar/armoredllama/server/LogBus.kt`
 
 **Interfaces:**
-- Consumes: `com.iguar.armedllama.model.LogLine`.
+- Consumes: `com.iguar.armoredllama.model.LogLine`.
 - Produces: `object LogBus` with `val lines: StateFlow<List<LogLine>>`, `fun append(body: String)`, `fun attachFile(file: File)`, `fun clear()`.
 
 - [ ] **Step 1: Write `LogBus.kt`**
 
 ```kotlin
-package com.iguar.armedllama.server
+package com.iguar.armoredllama.server
 
-import com.iguar.armedllama.model.LOG_CAP
-import com.iguar.armedllama.model.LogLine
+import com.iguar.armoredllama.model.LOG_CAP
+import com.iguar.armoredllama.model.LogLine
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.io.File
@@ -566,13 +573,13 @@ object LogBus {
 
 - [ ] **Step 2: Verify it compiles**
 
-Run: `& "C:\Users\iguar\Code\ArmedLlama\gradlew.bat" -p "C:\Users\iguar\Code\ArmedLlama" :app:compileDebugKotlin`
+Run: `& "C:\Users\iguar\Code\ArmoredLlama\gradlew.bat" -p "C:\Users\iguar\Code\ArmoredLlama" :app:compileDebugKotlin`
 Expected: `BUILD SUCCESSFUL`.
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add app/src/main/java/com/iguar/armedllama/server/LogBus.kt
+git add app/src/main/java/com/iguar/armoredllama/server/LogBus.kt
 git commit -m "feat(server): LogBus live log stream with file tee"
 ```
 
@@ -670,7 +677,7 @@ Replace the file contents with:
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.ArmedLlama">
+        android:theme="@style/Theme.ArmoredLlama">
 
         <service
             android:name=".server.LlamaServerService"
@@ -685,7 +692,7 @@ Replace the file contents with:
             android:name=".MainActivity"
             android:exported="true"
             android:label="@string/app_name"
-            android:theme="@style/Theme.ArmedLlama">
+            android:theme="@style/Theme.ArmoredLlama">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -721,11 +728,11 @@ or drop your own `libllamaserver.so` (+ its deps) here. Without them, Start show
 
 Run:
 ```bash
-& "C:\Users\iguar\Code\ArmedLlama\gradlew.bat" -p "C:\Users\iguar\Code\ArmedLlama" :app:fetchLlamaServer :app:assembleDebug
+& "C:\Users\iguar\Code\ArmoredLlama\gradlew.bat" -p "C:\Users\iguar\Code\ArmoredLlama" :app:fetchLlamaServer :app:assembleDebug
 ```
 Expected: `BUILD SUCCESSFUL`. Then verify the libs are packaged:
 ```bash
-unzip -l "C:/Users/iguar/Code/ArmedLlama/app/build/outputs/apk/debug/app-debug.apk" | grep -E 'lib/arm64-v8a/(libllamaserver|libllama|libmtmd|libggml)\.so'
+unzip -l "C:/Users/iguar/Code/ArmoredLlama/app/build/outputs/apk/debug/app-debug.apk" | grep -E 'lib/arm64-v8a/(libllamaserver|libllama|libmtmd|libggml)\.so'
 ```
 Expected: lines listing `libllamaserver.so`, `libllama.so`, `libmtmd.so`, `libggml.so`.
 
@@ -741,7 +748,7 @@ git commit -m "build: stage b9775 llama-server into jniLibs, FGS perms, service 
 ### Task 7: `LlamaServerService` (foreground exec + log streaming)
 
 **Files:**
-- Create: `app/src/main/java/com/iguar/armedllama/server/LlamaServerService.kt`
+- Create: `app/src/main/java/com/iguar/armoredllama/server/LlamaServerService.kt`
 
 **Interfaces:**
 - Consumes: `ConfigRepository`, `buildArgs`, `LogBus`.
@@ -750,7 +757,7 @@ git commit -m "build: stage b9775 llama-server into jniLibs, FGS perms, service 
 - [ ] **Step 1: Write `LlamaServerService.kt`**
 
 ```kotlin
-package com.iguar.armedllama.server
+package com.iguar.armoredllama.server
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -878,7 +885,7 @@ class LlamaServerService : Service() {
 
     private fun buildNotification(text: String): Notification =
         NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Armed Llama")
+            .setContentTitle("Armored Llama")
             .setContentText(text)
             .setSmallIcon(android.R.drawable.stat_sys_download_done)
             .setOngoing(true)
@@ -898,8 +905,8 @@ class LlamaServerService : Service() {
     companion object {
         private const val CHANNEL_ID = "llama_server"
         private const val NOTIF_ID = 1001
-        private const val ACTION_START = "com.iguar.armedllama.START"
-        private const val ACTION_STOP = "com.iguar.armedllama.STOP"
+        private const val ACTION_START = "com.iguar.armoredllama.START"
+        private const val ACTION_STOP = "com.iguar.armoredllama.STOP"
 
         private val statusFlow = MutableStateFlow(Status.STOPPED)
         val status: StateFlow<Status> = statusFlow
@@ -919,13 +926,13 @@ class LlamaServerService : Service() {
 
 - [ ] **Step 2: Verify it compiles**
 
-Run: `& "C:\Users\iguar\Code\ArmedLlama\gradlew.bat" -p "C:\Users\iguar\Code\ArmedLlama" :app:compileDebugKotlin`
+Run: `& "C:\Users\iguar\Code\ArmoredLlama\gradlew.bat" -p "C:\Users\iguar\Code\ArmoredLlama" :app:compileDebugKotlin`
 Expected: `BUILD SUCCESSFUL`.
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add app/src/main/java/com/iguar/armedllama/server/LlamaServerService.kt
+git add app/src/main/java/com/iguar/armoredllama/server/LlamaServerService.kt
 git commit -m "feat(server): foreground service execs llama-server, streams logs"
 ```
 
@@ -934,8 +941,8 @@ git commit -m "feat(server): foreground service execs llama-server, streams logs
 ### Task 8: Rewire `MonitorViewModel` + state (service, downloads, real logs)
 
 **Files:**
-- Modify: `app/src/main/java/com/iguar/armedllama/model/MonitorState.kt`
-- Modify: `app/src/main/java/com/iguar/armedllama/MonitorViewModel.kt`
+- Modify: `app/src/main/java/com/iguar/armoredllama/model/MonitorState.kt`
+- Modify: `app/src/main/java/com/iguar/armoredllama/MonitorViewModel.kt`
 
 **Interfaces:**
 - Consumes: `LlamaServerService`, `ConfigRepository`, `ModelDownloader`, `LogBus`, `LlamaConfig`.
@@ -946,8 +953,8 @@ git commit -m "feat(server): foreground service execs llama-server, streams logs
 In `MonitorUiState`, add a field (keep existing ones):
 
 ```kotlin
-    val serverStatus: com.iguar.armedllama.server.LlamaServerService.Status =
-        com.iguar.armedllama.server.LlamaServerService.Status.STOPPED,
+    val serverStatus: com.iguar.armoredllama.server.LlamaServerService.Status =
+        com.iguar.armoredllama.server.LlamaServerService.Status.STOPPED,
 ```
 
 `ModelEntry` already has `state`/`progress`; reuse them for download UI. No other model change.
@@ -960,10 +967,10 @@ Change imports — add:
 ```kotlin
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
-import com.iguar.armedllama.server.ConfigRepository
-import com.iguar.armedllama.server.LlamaServerService
-import com.iguar.armedllama.server.LogBus
-import com.iguar.armedllama.server.ModelDownloader
+import com.iguar.armoredllama.server.ConfigRepository
+import com.iguar.armoredllama.server.LlamaServerService
+import com.iguar.armoredllama.server.LogBus
+import com.iguar.armoredllama.server.ModelDownloader
 import kotlinx.coroutines.flow.collect
 ```
 and remove `import androidx.lifecycle.ViewModel`.
@@ -1048,18 +1055,18 @@ Keep `updateSettings`, `updateHfQuery`, `startDeploy` as-is for now (out of scop
 
 - [ ] **Step 4: Verify it builds**
 
-Run: `& "C:\Users\iguar\Code\ArmedLlama\gradlew.bat" -p "C:\Users\iguar\Code\ArmedLlama" :app:assembleDebug`
+Run: `& "C:\Users\iguar\Code\ArmoredLlama\gradlew.bat" -p "C:\Users\iguar\Code\ArmoredLlama" :app:assembleDebug`
 Expected: `BUILD SUCCESSFUL`. If the compiler flags an unused `nextLogLine`/`appendLog`/`now`, remove them.
 
 - [ ] **Step 5: Run unit tests (no regressions)**
 
-Run: `& "C:\Users\iguar\Code\ArmedLlama\gradlew.bat" -p "C:\Users\iguar\Code\ArmedLlama" :app:testDebugUnitTest`
+Run: `& "C:\Users\iguar\Code\ArmoredLlama\gradlew.bat" -p "C:\Users\iguar\Code\ArmoredLlama" :app:testDebugUnitTest`
 Expected: `BUILD SUCCESSFUL`.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add app/src/main/java/com/iguar/armedllama/MonitorViewModel.kt app/src/main/java/com/iguar/armedllama/model/MonitorState.kt
+git add app/src/main/java/com/iguar/armoredllama/MonitorViewModel.kt app/src/main/java/com/iguar/armoredllama/model/MonitorState.kt
 git commit -m "feat: drive llama-server service, real downloads, live logs from ViewModel"
 ```
 
@@ -1068,8 +1075,8 @@ git commit -m "feat: drive llama-server service, real downloads, live logs from 
 ### Task 9: Settings panel persists to `config.ini`
 
 **Files:**
-- Modify: `app/src/main/java/com/iguar/armedllama/MonitorViewModel.kt` (settings load/save)
-- Modify: `app/src/main/java/com/iguar/armedllama/ui/menu/SubPanels.kt` (bind editable fields)
+- Modify: `app/src/main/java/com/iguar/armoredllama/MonitorViewModel.kt` (settings load/save)
+- Modify: `app/src/main/java/com/iguar/armoredllama/ui/menu/SubPanels.kt` (bind editable fields)
 
 **Interfaces:**
 - Consumes: `ConfigRepository`, `LlamaConfig`.
@@ -1103,17 +1110,17 @@ Replace `updateSettings` with:
 
 - [ ] **Step 3: Verify SubPanels still binds these fields**
 
-Open `app/src/main/java/com/iguar/armedllama/ui/menu/SubPanels.kt`. Confirm the Settings panel already edits `ctx`, `threads`, `port` via `onUpdateSettings`. No code change needed if it does; if a field is missing a control, leave it — full settings UI is out of scope. (This step is verification only.)
+Open `app/src/main/java/com/iguar/armoredllama/ui/menu/SubPanels.kt`. Confirm the Settings panel already edits `ctx`, `threads`, `port` via `onUpdateSettings`. No code change needed if it does; if a field is missing a control, leave it — full settings UI is out of scope. (This step is verification only.)
 
 - [ ] **Step 4: Verify it builds**
 
-Run: `& "C:\Users\iguar\Code\ArmedLlama\gradlew.bat" -p "C:\Users\iguar\Code\ArmedLlama" :app:assembleDebug`
+Run: `& "C:\Users\iguar\Code\ArmoredLlama\gradlew.bat" -p "C:\Users\iguar\Code\ArmoredLlama" :app:assembleDebug`
 Expected: `BUILD SUCCESSFUL`.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add app/src/main/java/com/iguar/armedllama/MonitorViewModel.kt app/src/main/java/com/iguar/armedllama/ui/menu/SubPanels.kt
+git add app/src/main/java/com/iguar/armoredllama/MonitorViewModel.kt app/src/main/java/com/iguar/armoredllama/ui/menu/SubPanels.kt
 git commit -m "feat: settings panel reads/writes config.ini"
 ```
 
@@ -1122,19 +1129,21 @@ git commit -m "feat: settings panel reads/writes config.ini"
 ### Task 10: Final verification + notes
 
 **Files:**
-- Modify: `IMPLEMENTATION_NOTES.md` (mark #1/#2/#8 wired; #10 scoped to this model)
+- Modify: `IMPLEMENTATION_NOTES.md` (update Wiring Status for process/log/settings/model work)
 
 - [ ] **Step 1: Full build + tests**
 
 Run:
 ```bash
-& "C:\Users\iguar\Code\ArmedLlama\gradlew.bat" -p "C:\Users\iguar\Code\ArmedLlama" :app:assembleDebug :app:testDebugUnitTest
+& "C:\Users\iguar\Code\ArmoredLlama\gradlew.bat" -p "C:\Users\iguar\Code\ArmoredLlama" :app:assembleDebug :app:testDebugUnitTest
 ```
 Expected: `BUILD SUCCESSFUL`; all `server` unit tests pass.
 
 - [ ] **Step 2: Update `IMPLEMENTATION_NOTES.md`**
 
-In the WIRE THIS list, mark #1 (process control via `LlamaServerService`), #2 (real logs via `LogBus`), and #8 (settings → `config.ini`) as done; note #10 is wired for the gemma-4 model specifically (no generic search yet). Note the binary slot requirement.
+In the Wiring Status section, mark process control, real logs, and settings → `config.ini` as done.
+Model downloads started as the configured Gemma profile and later grew into real GGUF search through
+the Hugging Face API. Note the binary slot requirement.
 
 - [ ] **Step 3: Manual device check (requires the `.so` in place)**
 

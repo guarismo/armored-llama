@@ -8,6 +8,14 @@
 
 **Tech Stack:** Kotlin, Jetpack Compose, AGP 9.2.1, `HttpURLConnection`, `org.json`, `java.util.zip.GZIPInputStream`, `android.system.Os.chmod`. Host-JVM JUnit for pure units.
 
+## Current Status
+
+Implemented. The app now checks GitHub Releases, downloads android-arm64 llama.cpp assets, installs
+them under `filesDir/llama/<tag>/`, tracks the active tag, runs downloaded runtimes through
+`RuntimeBinaries.activeExecutable()`, and falls back to bundled `b9775`. The Update panel also exposes
+cleanup for downloaded runtimes. Device verification confirmed active downloaded tag `b9859` ran from
+`files/llama/b9859/llama-server`.
+
 ## Global Constraints
 
 - `targetSdk = 28`, `compileSdk = 36`, `minSdk = 26` (verbatim from spec §3). `compileSdk` unchanged at 36.
