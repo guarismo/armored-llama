@@ -46,7 +46,9 @@ class LlamaServerService : Service() {
         LogBus.attachFile(repo.logFile())
         val config = repo.load()
         val modelsDir = repo.modelsDir()
-        val target = RuntimeBinaries(filesDir, File(applicationInfo.nativeLibraryDir)).activeExecutable()
+        val runtime = RuntimeBinaries(filesDir, File(applicationInfo.nativeLibraryDir))
+        val onDownloadedRuntime = runtime.hasDownloadedActive()
+        val target = runtime.activeExecutable()
         val binary = File(target.execPath)
 
         if (!binary.exists()) {
@@ -65,6 +67,7 @@ class LlamaServerService : Service() {
         try {
             val pb = ProcessBuilder(args).redirectErrorStream(true).directory(modelsDir)
             pb.environment()["LD_LIBRARY_PATH"] = target.libDir
+            val startedAt = System.currentTimeMillis()
             val p = pb.start()
             process = p
             statusFlow.value = Status.RUNNING
@@ -75,6 +78,15 @@ class LlamaServerService : Service() {
                 }
                 val code = runCatching { p.waitFor() }.getOrDefault(-1)
                 LogBus.append("server exited (code $code)")
+                // A downloaded runtime that dies almost immediately with a non-zero code is
+                // corrupt/incompatible: drop it so the next Start falls back to bundled.
+                val ranBriefly = System.currentTimeMillis() - startedAt < EARLY_FAIL_MS
+                if (onDownloadedRuntime && code != 0 && ranBriefly && runtime.invalidateActive()) {
+                    LogBus.append(
+                        "downloaded runtime failed to start — reverting to bundled " +
+                            "${RuntimeBinaries.BUNDLED_TAG}; press Start again",
+                    )
+                }
                 process = null
                 statusFlow.value = Status.STOPPED
                 stopSelfResult(startId)
@@ -141,6 +153,8 @@ class LlamaServerService : Service() {
     companion object {
         private const val CHANNEL_ID = "llama_server"
         private const val NOTIF_ID = 1001
+        // A downloaded binary that exits sooner than this is treated as failed-to-launch.
+        private const val EARLY_FAIL_MS = 8_000L
         private const val ACTION_START = "com.iguar.armoredllama.START"
         private const val ACTION_STOP = "com.iguar.armoredllama.STOP"
 

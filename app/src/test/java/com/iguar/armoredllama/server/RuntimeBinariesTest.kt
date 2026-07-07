@@ -66,6 +66,25 @@ class RuntimeBinariesTest {
         assertFalse(java.io.File(activeDir.parentFile, "b9000").exists()) // …/llama/b9000 pruned
     }
 
+    @Test fun invalidateActive_dropsBadDownloadAndFallsBackToBundled() {
+        val rb = newBinaries()
+        rb.install("b9999", ByteArrayInputStream(tarGz("x/llama-server" to "broken".toByteArray())))
+        assertTrue(rb.hasDownloadedActive())
+
+        // A present-but-unrunnable exec should be dropped so the next launch uses bundled.
+        assertTrue(rb.invalidateActive())
+
+        assertEquals(RuntimeBinaries.BUNDLED_TAG, rb.activeTag())
+        assertFalse(rb.hasDownloadedActive())
+        assertTrue(rb.activeExecutable().execPath.endsWith(RuntimeBinaries.BUNDLED_EXEC))
+    }
+
+    @Test fun invalidateActive_isNoOpWhenAlreadyBundled() {
+        val rb = newBinaries()
+        assertFalse(rb.invalidateActive())
+        assertEquals(RuntimeBinaries.BUNDLED_TAG, rb.activeTag())
+    }
+
     @Test fun resetToBundled_removesDownloadedRuntimeAndFallsBack() {
         val rb = newBinaries()
         rb.install("b9999", ByteArrayInputStream(tarGz("x/llama-server" to "new".toByteArray())))

@@ -1,6 +1,11 @@
 package com.iguar.armoredllama.server
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -17,6 +22,8 @@ data class HfModelCandidate(
 )
 
 object HfModels {
+    private const val MAX_CONCURRENT_RESOLVES = 5
+
     suspend fun search(query: String, limit: Int = 8): List<HfModelCandidate> = withContext(Dispatchers.IO) {
         val q = URLEncoder.encode(query.trim().ifBlank { "GGUF" }, "UTF-8")
         val url = "https://huggingface.co/api/models?search=$q&filter=gguf&sort=downloads&direction=-1&limit=${limit * 2}"
@@ -24,7 +31,15 @@ object HfModels {
             .mapNotNull { it.optString("id").ifBlank { it.optString("modelId") }.ifBlank { null } }
             .distinct()
             .take(limit * 2)
-        repos.mapNotNull { repo -> runCatching { candidate(repo) }.getOrNull() }.take(limit)
+        // Resolve repos concurrently (bounded) — each candidate() is its own blocking round-trip;
+        // sequentially this was up to 16 fetches. awaitAll preserves the download-rank order.
+        val gate = Semaphore(MAX_CONCURRENT_RESOLVES)
+        val resolved = coroutineScope {
+            repos.map { repo ->
+                async { gate.withPermit { runCatching { candidate(repo) }.getOrNull() } }
+            }.awaitAll()
+        }
+        resolved.filterNotNull().take(limit)
     }
 
     private fun candidate(repo: String): HfModelCandidate? {

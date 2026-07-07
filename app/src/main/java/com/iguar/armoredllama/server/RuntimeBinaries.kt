@@ -38,6 +38,19 @@ class RuntimeBinaries(
 
     fun hasDownloadedActive(): Boolean = activeTag() != BUNDLED_TAG
 
+    /**
+     * Drop the currently-active downloaded runtime (e.g. it execs but immediately fails — a corrupt
+     * or incompatible binary) so the next launch falls back to bundled. Returns true if a downloaded
+     * runtime was invalidated, false if already on bundled. Keeps other downloaded dirs intact.
+     */
+    fun invalidateActive(): Boolean {
+        val tag = activeTag()
+        if (tag == BUNDLED_TAG) return false
+        File(root, tag).deleteRecursively()
+        activeFile.delete()
+        return true
+    }
+
     /** Remove all downloaded runtimes and cached update assets; subsequent launches use bundled. */
     fun resetToBundled() {
         root.deleteRecursively()

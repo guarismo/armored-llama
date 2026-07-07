@@ -280,13 +280,19 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             when (val r = GithubReleases.latest()) {
                 is LatestResult.Ok -> {
-                    val newer = isNewer(r.info.tag, active) && r.info.arm64AssetUrl != null
+                    val info = r.info
+                    val newer = isNewer(info.tag, active)
                     setUpdate {
-                        it.copy(
-                            status = if (newer) UpdateStatus.UPDATE_AVAILABLE else UpdateStatus.UP_TO_DATE,
-                            latest = r.info,
-                            error = if (r.info.arm64AssetUrl == null) "no arm64 build in ${r.info.tag}" else null,
-                        )
+                        when {
+                            // A newer release with no android-arm64 asset is a surfaced error, not
+                            // a silent "up to date" — the panel only shows `error` in the ERROR state.
+                            newer && info.arm64AssetUrl == null ->
+                                it.copy(status = UpdateStatus.ERROR, latest = info, error = "no arm64 build in ${info.tag}")
+                            newer ->
+                                it.copy(status = UpdateStatus.UPDATE_AVAILABLE, latest = info, error = null)
+                            else ->
+                                it.copy(status = UpdateStatus.UP_TO_DATE, latest = info, error = null)
+                        }
                     }
                 }
                 is LatestResult.Err -> setUpdate { it.copy(status = UpdateStatus.ERROR, error = r.message) }
@@ -307,6 +313,7 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 withContext(Dispatchers.IO) {
                     file.inputStream().use { runtimeBinaries.install(info.tag, it) }
+                    file.delete() // staged tarball is no longer needed once extracted
                 }
                 setUpdate { it.copy(status = UpdateStatus.INSTALLED, activeTag = info.tag, progress = 1f) }
                 LogBus.append("installed llama.cpp ${info.tag} — restart server to apply")
@@ -366,6 +373,9 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
                             modelSizeGB = candidate.sizeGB,
                             freeRamMB = freeRamMB,
                             ctx = settings.ctx,
+                            cacheTypeK = settings.cacheTypeK,
+                            cacheTypeV = settings.cacheTypeV,
+                            flashAttn = settings.flashAttn,
                         ),
                         state = if (installed) ModelState.INSTALLED else ModelState.IDLE,
                     )
@@ -476,6 +486,9 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
                     ctx = settings.ctx,
                     hasDraft = cfg.draftFile.isNotBlank(),
                     hasMmproj = cfg.mmprojFile.isNotBlank(),
+                    cacheTypeK = settings.cacheTypeK,
+                    cacheTypeV = settings.cacheTypeV,
+                    flashAttn = settings.flashAttn,
                 ),
                 state = if (installed) ModelState.INSTALLED else ModelState.IDLE,
             ),
@@ -494,6 +507,9 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
             ctx = state.settings.ctx,
             hasDraft = cfg.useDraft && cfg.draftFile.isNotBlank(),
             hasMmproj = cfg.useMmproj && cfg.mmprojFile.isNotBlank(),
+            cacheTypeK = cfg.cacheTypeK,
+            cacheTypeV = cfg.cacheTypeV,
+            flashAttn = cfg.flashAttn,
         )
         if (fit.level == ModelFitLevel.TOO_LARGE || fit.level == ModelFitLevel.TIGHT) {
             LogBus.append("RAM warning: ${fit.label.lowercase()} for ${cfg.modelFile}; ${fit.detail}")
