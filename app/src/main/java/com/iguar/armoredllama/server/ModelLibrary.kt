@@ -22,7 +22,7 @@ fun switchedConfig(cfg: LlamaConfig, file: String): LlamaConfig {
     val next = if (file == d.modelFile) {
         cfg.copy(repo = d.repo, modelFile = d.modelFile, draftFile = d.draftFile, mmprojFile = d.mmprojFile)
     } else {
-        cfg.copy(repo = "", modelFile = file, draftFile = "", mmprojFile = "")
+        cfg.copy(repo = cfg.library[file] ?: "", modelFile = file, draftFile = "", mmprojFile = "")
     }
     return next.copy(useDraft = next.draftFile.isNotBlank(), useMmproj = next.mmprojFile.isNotBlank())
 }

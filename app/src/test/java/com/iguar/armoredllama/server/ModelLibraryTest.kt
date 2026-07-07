@@ -50,4 +50,13 @@ class ModelLibraryTest {
         assertEquals(listOf(d.draftFile, d.mmprojFile), companionsOf(d.modelFile))
         assertEquals(emptyList<String>(), companionsOf("Qwen3.5-4B-Q4_K_M.gguf"))
     }
+
+    @Test fun switchedConfig_looksUpRepoInLibrary() {
+        val cfg = LlamaConfig(library = mapOf("Qwen3.5-4B-Q4_K_M.gguf" to "unsloth/Qwen3.5-4B-GGUF"))
+
+        val next = switchedConfig(cfg, "Qwen3.5-4B-Q4_K_M.gguf")
+
+        assertEquals("unsloth/Qwen3.5-4B-GGUF", next.repo)
+        assertEquals(cfg.library, next.library) // library passes through
+    }
 }

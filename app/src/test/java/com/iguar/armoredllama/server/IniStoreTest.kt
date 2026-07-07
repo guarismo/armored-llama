@@ -75,4 +75,15 @@ class IniStoreTest {
         assertEquals(LlamaConfig().host, cfg.host)            // default kept
         assertEquals(LlamaConfig().modelFile, cfg.modelFile)  // default kept
     }
+
+    @Test fun libraryRoundTrips() {
+        val cfg = LlamaConfig(library = mapOf("Qwen3.5-4B-Q4_K_M.gguf" to "unsloth/Qwen3.5-4B-GGUF"))
+        val restored = llamaConfigFromIni(cfg.toIni())
+        assertEquals(cfg.library, restored.library)
+    }
+
+    @Test fun missingLibrarySectionYieldsEmptyMap() {
+        val restored = llamaConfigFromIni(LlamaConfig().toIni())
+        assertEquals(emptyMap<String, String>(), restored.library)
+    }
 }

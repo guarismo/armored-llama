@@ -401,13 +401,16 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
         if (target.fit.level == ModelFitLevel.TIGHT || target.fit.level == ModelFitLevel.TOO_LARGE) {
             LogBus.append("RAM warning before download: ${target.fit.label.lowercase()} for ${target.file}; ${target.fit.detail}")
         }
-        val config = configRepo.load().copy(
+        val prev = configRepo.load()
+        val config = prev.copy(
             repo = target.repo,
             modelFile = target.file,
             draftFile = target.draftFile,
             mmprojFile = target.mmprojFile,
             useDraft = target.draftFile.isNotBlank(),
             useMmproj = target.mmprojFile.isNotBlank(),
+            // Remember where this file came from so the local list can show/switch it later.
+            library = prev.library + (target.file to target.repo),
         )
         configRepo.save(config)
         state = state.copy(

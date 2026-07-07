@@ -26,4 +26,6 @@ data class LlamaConfig(
     // Feature gates (filenames above are kept either way, so toggling is reversible):
     val useDraft: Boolean = true,    // speculative decoding: emit --model-draft + --spec-*
     val useMmproj: Boolean = true,   // vision/multimodal: emit --mmproj (~1 GB; off for text-only)
+    // Downloaded-file → repo bookkeeping (INI [library] section); display + switch-back metadata.
+    val library: Map<String, String> = emptyMap(),
 )
