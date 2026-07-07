@@ -75,7 +75,7 @@ data class UpdateUi(
     val error: String? = null,
 )
 
-enum class ModelState { IDLE, DOWNLOADING, INSTALLED }
+enum class ModelState { IDLE, DOWNLOADING, INSTALLED, ACTIVE }
 
 /** A Hugging Face GGUF entry; INSTALLED means the selected file is present on disk. */
 data class ModelEntry(

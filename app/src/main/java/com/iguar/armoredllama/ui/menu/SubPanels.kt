@@ -425,6 +425,11 @@ private fun ModelCard(model: ModelEntry, onGet: () -> Unit) {
                 Spacer(Modifier.width(4.dp))
                 Text("Installed", style = MonitorType.monoCaption, color = c.good)
             }
+            ModelState.ACTIVE -> Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.Check, contentDescription = null, tint = c.good, modifier = Modifier.size(15.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("ACTIVE", style = MonitorType.monoCaption, color = c.good)
+            }
         }
     }
 }
