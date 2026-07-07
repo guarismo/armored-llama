@@ -18,7 +18,7 @@ const val HISTORY_SIZE = 26
 const val LOG_CAP = 90
 
 /** Which menu surface is showing over the dashboard (null = dashboard only). */
-enum class Panel { MENU, SETTINGS, RELEASE, HF }
+enum class Panel { MENU, CHAT, SETTINGS, RELEASE, HF }
 
 /** Live telemetry read from device sources and server logs, with fallback defaults. */
 data class Metrics(

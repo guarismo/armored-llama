@@ -21,7 +21,7 @@ class MainActivity : ComponentActivity() {
         onBackPressedDispatcher.addCallback(this) {
             when (viewModel.state.panel) {
                 Panel.MENU -> viewModel.closeMenu()
-                Panel.SETTINGS, Panel.RELEASE, Panel.HF -> viewModel.backToMenu()
+                Panel.CHAT, Panel.SETTINGS, Panel.RELEASE, Panel.HF -> viewModel.backToMenu()
                 null -> { isEnabled = false; onBackPressedDispatcher.onBackPressed() }
             }
         }
