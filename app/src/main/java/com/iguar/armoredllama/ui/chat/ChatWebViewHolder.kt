@@ -20,6 +20,13 @@ object ChatWebViewHolder {
     @SuppressLint("SetJavaScriptEnabled")
     fun obtain(context: Context, url: String): WebView {
         val view = webView ?: WebView(context).apply {
+            // Explicit MATCH_PARENT height: a WRAP_CONTENT WebView puts Chromium in a content-growing
+            // mode where CSS `100vh`/`100dvh` resolve to 0, collapsing the web UI's viewport-height
+            // layout (blank centered content + blank sidebar) while innerHeight still reads correctly.
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+            )
             settings.javaScriptEnabled = true // the llama-server web UI is a JS SPA
             settings.domStorageEnabled = true // conversations persist via IndexedDB
             webViewClient = WebViewClient()   // keep navigation in-place, not an external browser
