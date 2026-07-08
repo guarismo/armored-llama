@@ -29,6 +29,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -327,12 +328,15 @@ fun HfPanel(state: MonitorUiState, onBack: () -> Unit, callbacks: MenuCallbacks)
             ) {
                 state.visibleModels.forEach { model ->
                     val local = state.hfQuery.isBlank() && model.state == ModelState.INSTALLED
-                    ModelCard(
-                        model = model,
-                        onGet = { callbacks.onDownloadModel(model.id) },
-                        onSwitch = if (local) ({ callbacks.onSwitchModel(model.file) }) else null,
-                        onDelete = if (local) ({ callbacks.onDeleteModel(model.file) }) else null,
-                    )
+                    // key(): bind row state (the delete-confirm flag) to the file, not list position.
+                    key(model.file) {
+                        ModelCard(
+                            model = model,
+                            onGet = { callbacks.onDownloadModel(model.id) },
+                            onSwitch = if (local) ({ callbacks.onSwitchModel(model.file) }) else null,
+                            onDelete = if (local) ({ callbacks.onDeleteModel(model.file) }) else null,
+                        )
+                    }
                 }
             }
         }
@@ -475,8 +479,12 @@ private fun ModelCard(
             onDismissRequest = { confirmDelete = false },
             title = { Text("Delete model?") },
             text = {
-                val size = if (model.sizeGB > 0f) " — frees %.1f GB".format(model.sizeGB) else ""
-                Text(model.file + size)
+                // freedGB includes on-disk companions (curated draft/mmproj go with the model).
+                val hasCompanions = model.freedGB - model.sizeGB > 0.01f
+                val companions = if (hasCompanions) " and its draft + vision files" else ""
+                val freed = maxOf(model.freedGB, model.sizeGB)
+                val size = if (freed > 0f) " — frees %.1f GB".format(freed) else ""
+                Text(model.file + companions + size)
             },
             confirmButton = {
                 TextButton(onClick = { confirmDelete = false; onDelete?.invoke() }) { Text("Delete") }

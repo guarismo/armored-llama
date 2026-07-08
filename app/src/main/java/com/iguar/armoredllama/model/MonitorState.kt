@@ -90,6 +90,7 @@ data class ModelEntry(
     val fit: ModelFit = ModelFit.UNKNOWN,
     val state: ModelState = ModelState.IDLE,
     val progress: Float = 0f, // 0..1
+    val freedGB: Float = 0f,  // on-disk GB a delete would free (primary + companions)
 )
 
 /** The full UI state, parent-owned (per README). */

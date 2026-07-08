@@ -486,7 +486,11 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
         }
         val dir = configRepo.modelsDir()
         val removed = (listOf(file) + companionsOf(file)).filter { File(dir, it).delete() }
-        if (removed.isNotEmpty()) LogBus.append("deleted: ${removed.joinToString()}")
+        if (removed.isNotEmpty()) {
+            LogBus.append("deleted: ${removed.joinToString()}")
+            // Drop stale file→repo bookkeeping for the removed files.
+            configRepo.save(cfg.copy(library = cfg.library - removed.toSet()))
+        }
         state = state.copy(models = localModels(state.metrics.ramFree, state.settings))
     }
 
@@ -558,6 +562,10 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
         val entries = primaryModels(onDisk).map { (name, sizeBytes) ->
             val sizeGB = sizeBytes.toFloat() / (1024f * 1024f * 1024f)
             val preview = switchedConfig(cfg, name) // what switching here would configure
+            // Deleting also removes the model's on-disk companions (curated draft/mmproj).
+            val companionBytes = companionsOf(name).sumOf { comp ->
+                onDisk.firstOrNull { it.first == comp }?.second ?: 0L
+            }
             ModelEntry(
                 id = name,
                 repo = preview.repo.ifBlank { "local file" },
@@ -578,8 +586,12 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
                     flashAttn = settings.flashAttn,
                 ),
                 state = if (name == cfg.modelFile) ModelState.ACTIVE else ModelState.INSTALLED,
+                freedGB = sizeGB + companionBytes.toFloat() / (1024f * 1024f * 1024f),
             )
-        }.sortedByDescending { it.state == ModelState.ACTIVE }
+        }.sortedWith(
+            compareByDescending<ModelEntry> { it.state == ModelState.ACTIVE }
+                .thenBy { it.name.lowercase() }, // stable order: listFiles() is filesystem-ordered
+        )
         // Fresh install / configured model not downloaded: show the seed entry so it can be Got.
         return if (entries.none { it.state == ModelState.ACTIVE }) {
             seedModels(freeRamMB, settings) + entries
