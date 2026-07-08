@@ -19,10 +19,13 @@ import com.iguar.armoredllama.server.ModelDownloader
 import com.iguar.armoredllama.server.ModelFitLevel
 import com.iguar.armoredllama.server.RuntimeBinaries
 import com.iguar.armoredllama.server.UpdateDownloader
+import com.iguar.armoredllama.server.companionsOf
 import com.iguar.armoredllama.server.estimateModelFit
 import com.iguar.armoredllama.server.isServerIdle
 import com.iguar.armoredllama.server.isNewer
 import com.iguar.armoredllama.server.parseThroughput
+import com.iguar.armoredllama.server.primaryModels
+import com.iguar.armoredllama.server.switchedConfig
 import kotlinx.coroutines.flow.collect
 import com.iguar.armoredllama.device.DeviceTelemetry
 import com.iguar.armoredllama.model.CORE_COUNT
@@ -59,12 +62,13 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
     private val runtimeBinaries = RuntimeBinaries(app.filesDir, File(app.applicationInfo.nativeLibraryDir))
 
     var state by mutableStateOf(
-        MonitorUiState(models = seedModels())
+        MonitorUiState(models = localModels())
     )
         private set
 
     private var tickJob: Job? = null
     private var hfSearchJob: Job? = null
+    private var pendingRestart = false
     private var tickCount = 0
 
     /** Real device telemetry. Reads fall back to mock values when unreadable. */
@@ -102,7 +106,7 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
                 useMmproj = cfg.useMmproj,
             ),
             update = state.update.copy(activeTag = runtimeBinaries.activeTag()),
-            models = seedModels(
+            models = localModels(
                 freeRamMB = state.metrics.ramFree,
                 settings = state.settings.copy(
                     ctx = cfg.ctx,
@@ -132,6 +136,12 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
                     running = s == LlamaServerService.Status.RUNNING || s == LlamaServerService.Status.STARTING,
                     metrics = if (stopped) state.metrics.copy(tps = 0f, pp = 0f) else state.metrics,
                 )
+                // Model switch requested while running: restart with the new config once stopped.
+                if (stopped && pendingRestart) {
+                    pendingRestart = false
+                    toggleRunning()
+                }
+                if (s == LlamaServerService.Status.ERROR) pendingRestart = false
             }
         }
         // Parse throughput from the uncapped raw log stream (#7). Collecting LogBus.lines (capped
@@ -351,7 +361,7 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
         state = state.copy(hfQuery = q)
         hfSearchJob?.cancel()
         if (q.isBlank()) {
-            state = state.copy(models = seedModels(state.metrics.ramFree, state.settings), hfLoading = false, hfError = null)
+            state = state.copy(models = localModels(state.metrics.ramFree, state.settings), hfLoading = false, hfError = null)
             return
         }
         hfSearchJob = viewModelScope.launch {
@@ -387,7 +397,7 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
                 )
             } catch (e: Exception) {
                 state = state.copy(
-                    models = seedModels(state.metrics.ramFree, state.settings),
+                    models = localModels(state.metrics.ramFree, state.settings),
                     hfLoading = false,
                     hfError = "Hugging Face search failed: ${e.message}",
                 )
@@ -401,13 +411,16 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
         if (target.fit.level == ModelFitLevel.TIGHT || target.fit.level == ModelFitLevel.TOO_LARGE) {
             LogBus.append("RAM warning before download: ${target.fit.label.lowercase()} for ${target.file}; ${target.fit.detail}")
         }
-        val config = configRepo.load().copy(
+        val prev = configRepo.load()
+        val config = prev.copy(
             repo = target.repo,
             modelFile = target.file,
             draftFile = target.draftFile,
             mmprojFile = target.mmprojFile,
             useDraft = target.draftFile.isNotBlank(),
             useMmproj = target.mmprojFile.isNotBlank(),
+            // Remember where this file came from so the local list can show/switch it later.
+            library = prev.library + (target.file to target.repo),
         )
         configRepo.save(config)
         state = state.copy(
@@ -441,6 +454,44 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun updateModel(id: String, transform: (ModelEntry) -> ModelEntry) {
         state = state.copy(models = state.models.map { if (it.id == id) transform(it) else it })
+    }
+
+    // Local model switching (blank-search list) ------------------------------------------------
+    fun switchModel(file: String) {
+        if (state.serverStatus == LlamaServerService.Status.STARTING) {
+            LogBus.append("switch ignored: wait for the server to finish starting")
+            return
+        }
+        val cfg = configRepo.load()
+        if (file == cfg.modelFile) return
+        val next = switchedConfig(cfg, file)
+        configRepo.save(next) // synchronous: the restart below reads config.ini at launch
+        state = state.copy(
+            modelFile = next.modelFile.substringBeforeLast(".").takeUnless { it.isBlank() } ?: next.modelFile,
+            settings = state.settings.copy(useDraft = next.useDraft, useMmproj = next.useMmproj),
+            models = localModels(state.metrics.ramFree, state.settings),
+        )
+        if (state.running) {
+            LogBus.append("switching model → $file")
+            pendingRestart = true
+            LlamaServerService.stop(getApplication())
+        }
+    }
+
+    fun deleteModel(file: String) {
+        val cfg = configRepo.load()
+        if (file == cfg.modelFile) {
+            LogBus.append("delete refused: $file is the active model — switch first")
+            return
+        }
+        val dir = configRepo.modelsDir()
+        val removed = (listOf(file) + companionsOf(file)).filter { File(dir, it).delete() }
+        if (removed.isNotEmpty()) {
+            LogBus.append("deleted: ${removed.joinToString()}")
+            // Drop stale file→repo bookkeeping for the removed files.
+            configRepo.save(cfg.copy(library = cfg.library - removed.toSet()))
+        }
+        state = state.copy(models = localModels(state.metrics.ramFree, state.settings))
     }
 
     // ----- Helpers ----------------------------------------------------------------------------
@@ -493,6 +544,58 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
                 state = if (installed) ModelState.INSTALLED else ModelState.IDLE,
             ),
         )
+    }
+
+    /**
+     * Blank-search source: every primary GGUF on disk (active first). Falls back to the
+     * configured-model seed entry when the configured model is not downloaded yet (fresh
+     * install), so the curated default stays one tap away.
+     */
+    private fun localModels(
+        freeRamMB: Float = 0f,
+        settings: ServerSettings = ServerSettings(),
+    ): List<ModelEntry> {
+        val cfg = configRepo.load()
+        val onDisk = configRepo.modelsDir().listFiles().orEmpty()
+            .filter { it.isFile }
+            .map { it.name to it.length() }
+        val entries = primaryModels(onDisk).map { (name, sizeBytes) ->
+            val sizeGB = sizeBytes.toFloat() / (1024f * 1024f * 1024f)
+            val preview = switchedConfig(cfg, name) // what switching here would configure
+            // Deleting also removes the model's on-disk companions (curated draft/mmproj).
+            val companionBytes = companionsOf(name).sumOf { comp ->
+                onDisk.firstOrNull { it.first == comp }?.second ?: 0L
+            }
+            ModelEntry(
+                id = name,
+                repo = preview.repo.ifBlank { "local file" },
+                name = name.substringBeforeLast(".").takeUnless { it.isBlank() } ?: name,
+                file = name,
+                quant = quantFrom(name),
+                sizeGB = sizeGB,
+                draftFile = preview.draftFile,
+                mmprojFile = preview.mmprojFile,
+                fit = estimateModelFit(
+                    modelSizeGB = sizeGB,
+                    freeRamMB = freeRamMB,
+                    ctx = settings.ctx,
+                    hasDraft = preview.draftFile.isNotBlank(),
+                    hasMmproj = preview.mmprojFile.isNotBlank(),
+                    cacheTypeK = settings.cacheTypeK,
+                    cacheTypeV = settings.cacheTypeV,
+                    flashAttn = settings.flashAttn,
+                ),
+                state = if (name == cfg.modelFile) ModelState.ACTIVE else ModelState.INSTALLED,
+                freedGB = sizeGB + companionBytes.toFloat() / (1024f * 1024f * 1024f),
+            )
+        }.sortedWith(
+            compareByDescending<ModelEntry> { it.state == ModelState.ACTIVE }
+                .thenBy { it.name.lowercase() }, // stable order: listFiles() is filesystem-ordered
+        )
+        // Fresh install / configured model not downloaded: show the seed entry so it can be Got.
+        return if (entries.none { it.state == ModelState.ACTIVE }) {
+            seedModels(freeRamMB, settings) + entries
+        } else entries
     }
 
     private fun warnIfSelectedModelMayNotFit() {

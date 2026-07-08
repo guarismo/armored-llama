@@ -10,4 +10,6 @@ data class MenuCallbacks(
     val onRemoveDownloadedUpdate: () -> Unit,
     val onUpdateHfQuery: (String) -> Unit,
     val onDownloadModel: (String) -> Unit,
+    val onSwitchModel: (String) -> Unit,
+    val onDeleteModel: (String) -> Unit,
 )

@@ -93,11 +93,6 @@ object HfModels {
     private fun String.encodePath(): String =
         split('/').joinToString("/") { URLEncoder.encode(it, "UTF-8") }
 
-    private fun isCompanionFile(name: String): Boolean {
-        val n = name.lowercase()
-        return "mmproj" in n || "draft" in n || "mtp" in n
-    }
-
     private fun fileRank(name: String): Int {
         val n = name.uppercase()
         return when {

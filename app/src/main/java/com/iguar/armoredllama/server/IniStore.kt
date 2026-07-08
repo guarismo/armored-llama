@@ -61,6 +61,7 @@ fun LlamaConfig.toIni(): String = writeIni(
             "use_draft" to useDraft.toString(),
             "use_mmproj" to useMmproj.toString(),
         ),
+        "library" to LinkedHashMap(library),
     ),
 )
 
@@ -93,5 +94,6 @@ fun llamaConfigFromIni(text: String): LlamaConfig {
         mmprojFile = m["mmproj"] ?: d.mmprojFile,
         useDraft = m["use_draft"]?.toBooleanStrictOrNull() ?: d.useDraft,
         useMmproj = m["use_mmproj"]?.toBooleanStrictOrNull() ?: d.useMmproj,
+        library = ini["library"].orEmpty(),
     )
 }

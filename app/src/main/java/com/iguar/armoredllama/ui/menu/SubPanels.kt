@@ -21,10 +21,18 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -299,6 +307,10 @@ fun HfPanel(state: MonitorUiState, onBack: () -> Unit, callbacks: MenuCallbacks)
         ) {
             SearchField(query = state.hfQuery, onQueryChange = callbacks.onUpdateHfQuery)
             Spacer(Modifier.height(12.dp))
+            if (state.hfQuery.isBlank()) {
+                Text("On this phone", style = MonitorType.monoCaption, color = c.muted)
+                Spacer(Modifier.height(8.dp))
+            }
             if (state.hfLoading) {
                 Text("Searching Hugging Face...", style = MonitorType.monoCaption, color = c.muted)
                 Spacer(Modifier.height(8.dp))
@@ -315,7 +327,16 @@ fun HfPanel(state: MonitorUiState, onBack: () -> Unit, callbacks: MenuCallbacks)
                 verticalArrangement = Arrangement.spacedBy(9.dp),
             ) {
                 state.visibleModels.forEach { model ->
-                    ModelCard(model) { callbacks.onDownloadModel(model.id) }
+                    val local = state.hfQuery.isBlank() && model.state == ModelState.INSTALLED
+                    // key(): bind row state (the delete-confirm flag) to the file, not list position.
+                    key(model.file) {
+                        ModelCard(
+                            model = model,
+                            onGet = { callbacks.onDownloadModel(model.id) },
+                            onSwitch = if (local) ({ callbacks.onSwitchModel(model.file) }) else null,
+                            onDelete = if (local) ({ callbacks.onDeleteModel(model.file) }) else null,
+                        )
+                    }
                 }
             }
         }
@@ -353,8 +374,14 @@ private fun SearchField(query: String, onQueryChange: (String) -> Unit) {
 }
 
 @Composable
-private fun ModelCard(model: ModelEntry, onGet: () -> Unit) {
+private fun ModelCard(
+    model: ModelEntry,
+    onGet: () -> Unit,
+    onSwitch: (() -> Unit)? = null,
+    onDelete: (() -> Unit)? = null,
+) {
     val c = MonitorTheme.colors
+    var confirmDelete by remember { mutableStateOf(false) }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -420,12 +447,52 @@ private fun ModelCard(model: ModelEntry, onGet: () -> Unit) {
                     modifier = Modifier.fillMaxWidth().height(6.dp),
                 )
             }
-            ModelState.INSTALLED -> Row(verticalAlignment = Alignment.CenterVertically) {
+            ModelState.ACTIVE -> Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.Check, contentDescription = null, tint = c.good, modifier = Modifier.size(15.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("ACTIVE", style = MonitorType.monoCaption, color = c.good)
+            }
+            ModelState.INSTALLED -> if (onSwitch != null) {
+                Column(horizontalAlignment = Alignment.End) {
+                    SmallButton("Use", c.accent, onSwitch)
+                    if (onDelete != null) {
+                        Spacer(Modifier.height(6.dp))
+                        Icon(
+                            Icons.Filled.Delete,
+                            contentDescription = "Delete ${model.file}",
+                            tint = c.bad,
+                            modifier = Modifier
+                                .size(18.dp)
+                                .clickable { confirmDelete = true },
+                        )
+                    }
+                }
+            } else Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Filled.Check, contentDescription = null, tint = c.good, modifier = Modifier.size(15.dp))
                 Spacer(Modifier.width(4.dp))
                 Text("Installed", style = MonitorType.monoCaption, color = c.good)
             }
         }
+    }
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("Delete model?") },
+            text = {
+                // freedGB includes on-disk companions (curated draft/mmproj go with the model).
+                val hasCompanions = model.freedGB - model.sizeGB > 0.01f
+                val companions = if (hasCompanions) " and its draft + vision files" else ""
+                val freed = maxOf(model.freedGB, model.sizeGB)
+                val size = if (freed > 0f) " — frees %.1f GB".format(freed) else ""
+                Text(model.file + companions + size)
+            },
+            confirmButton = {
+                TextButton(onClick = { confirmDelete = false; onDelete?.invoke() }) { Text("Delete") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDelete = false }) { Text("Cancel") }
+            },
+        )
     }
 }
 

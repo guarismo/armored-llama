@@ -75,7 +75,7 @@ data class UpdateUi(
     val error: String? = null,
 )
 
-enum class ModelState { IDLE, DOWNLOADING, INSTALLED }
+enum class ModelState { IDLE, DOWNLOADING, INSTALLED, ACTIVE }
 
 /** A Hugging Face GGUF entry; INSTALLED means the selected file is present on disk. */
 data class ModelEntry(
@@ -90,6 +90,7 @@ data class ModelEntry(
     val fit: ModelFit = ModelFit.UNKNOWN,
     val state: ModelState = ModelState.IDLE,
     val progress: Float = 0f, // 0..1
+    val freedGB: Float = 0f,  // on-disk GB a delete would free (primary + companions)
 )
 
 /** The full UI state, parent-owned (per README). */
