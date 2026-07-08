@@ -8,6 +8,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import com.iguar.armoredllama.model.Panel
 import com.iguar.armoredllama.ui.MonitorScreen
+import com.iguar.armoredllama.ui.chat.ChatWebViewHolder
 import com.iguar.armoredllama.ui.theme.ArmoredLlamaTheme
 
 class MainActivity : ComponentActivity() {
@@ -21,7 +22,7 @@ class MainActivity : ComponentActivity() {
         onBackPressedDispatcher.addCallback(this) {
             when (viewModel.state.panel) {
                 Panel.MENU -> viewModel.closeMenu()
-                Panel.SETTINGS, Panel.RELEASE, Panel.HF -> viewModel.backToMenu()
+                Panel.CHAT, Panel.SETTINGS, Panel.RELEASE, Panel.HF -> viewModel.backToMenu()
                 null -> { isEnabled = false; onBackPressedDispatcher.onBackPressed() }
             }
         }
@@ -30,5 +31,10 @@ class MainActivity : ComponentActivity() {
                 MonitorScreen(viewModel)
             }
         }
+    }
+
+    override fun onDestroy() {
+        ChatWebViewHolder.destroy()
+        super.onDestroy()
     }
 }
