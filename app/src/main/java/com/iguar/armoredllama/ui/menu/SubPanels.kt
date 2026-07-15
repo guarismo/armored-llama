@@ -332,7 +332,7 @@ fun HfPanel(state: MonitorUiState, onBack: () -> Unit, callbacks: MenuCallbacks)
                     key(model.file) {
                         ModelCard(
                             model = model,
-                            onGet = { callbacks.onDownloadModel(model.id) },
+                            onGet = { callbacks.onDownloadModel(model.repo, model.file) },
                             onSwitch = if (local) ({ callbacks.onSwitchModel(model.file) }) else null,
                             onDelete = if (local) ({ callbacks.onDeleteModel(model.file) }) else null,
                         )

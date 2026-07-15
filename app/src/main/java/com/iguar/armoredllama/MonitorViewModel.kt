@@ -8,6 +8,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import android.os.Build
 import android.provider.Settings
+import com.iguar.armoredllama.server.CompanionKind
+import com.iguar.armoredllama.server.companionFilesForRepo
 import com.iguar.armoredllama.server.ConfigRepository
 import com.iguar.armoredllama.server.GithubReleases
 import com.iguar.armoredllama.server.HfModels
@@ -423,49 +425,94 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun downloadModel(id: String) {
-        val target = state.models.firstOrNull { it.id == id } ?: return
-        if (target.state == ModelState.DOWNLOADING) return
-        if (target.fit.level == ModelFitLevel.TIGHT || target.fit.level == ModelFitLevel.TOO_LARGE) {
-            LogBus.append("RAM warning before download: ${target.fit.label.lowercase()} for ${target.file}; ${target.fit.detail}")
+    fun downloadModel(repo: String, file: String) {
+        val entry = state.models.firstOrNull { it.id == repo }
+        if (entry?.downloadingFile != null) return
+        val d = LlamaConfig()
+        // Curated default brings its bundled companions; any other repo derives them from [library].
+        val (draft, mmproj) = if (repo == d.repo && file == d.modelFile) {
+            d.draftFile to d.mmprojFile
+        } else {
+            val prevLib = configRepo.load().library
+            companionFilesForRepo(prevLib, repo, file)
         }
         val prev = configRepo.load()
         val config = prev.copy(
-            repo = target.repo,
-            modelFile = target.file,
-            draftFile = target.draftFile,
-            mmprojFile = target.mmprojFile,
-            useDraft = target.draftFile.isNotBlank(),
-            useMmproj = target.mmprojFile.isNotBlank(),
-            // Remember where this file came from so the local list can show/switch it later.
-            library = prev.library + (target.file to target.repo),
+            repo = repo,
+            modelFile = file,
+            draftFile = draft,
+            mmprojFile = mmproj,
+            useDraft = draft.isNotBlank(),
+            useMmproj = mmproj.isNotBlank(),
+            library = prev.library + (file to repo),
         )
         configRepo.save(config)
         state = state.copy(
-            modelFile = target.file.substringBeforeLast(".").takeUnless { it.isBlank() } ?: target.file,
+            modelFile = file.substringBeforeLast(".").takeUnless { it.isBlank() } ?: file,
             settings = state.settings.copy(useDraft = config.useDraft, useMmproj = config.useMmproj),
         )
-        val files = listOf(config.modelFile, config.draftFile, config.mmprojFile).filter { it.isNotBlank() }
+        // Only fetch files not already on disk (curated companions download; derived ones are present).
+        val files = listOf(config.modelFile, config.draftFile, config.mmprojFile)
+            .filter { it.isNotBlank() && downloader.localSize(it) <= 0L }
+        val fit = entry?.quants?.firstOrNull { it.file == file }?.fit ?: entry?.fit
+        if (fit != null && (fit.level == ModelFitLevel.TIGHT || fit.level == ModelFitLevel.TOO_LARGE)) {
+            LogBus.append("RAM warning before download: ${fit.label.lowercase()} for $file; ${fit.detail}")
+        }
         viewModelScope.launch {
             if (files.isEmpty()) {
-                LogBus.append("download skipped: no model files configured")
-                updateModel(id) { it.copy(state = ModelState.IDLE) }
+                updateModel(repo) { it.copy(state = ModelState.INSTALLED, downloadingFile = null, progress = 1f) }
                 return@launch
             }
-            updateModel(id) { it.copy(state = ModelState.DOWNLOADING, progress = 0f) }
+            updateModel(repo) { it.copy(state = ModelState.DOWNLOADING, downloadingFile = file, progress = 0f) }
             try {
-                files.forEachIndexed { idx, file ->
-                    downloader.download(config.repo, file) { written, total ->
+                files.forEachIndexed { idx, f ->
+                    downloader.download(config.repo, f) { written, total ->
                         val frac = if (total > 0) written.toFloat() / total else 0f
                         val overall = (idx + frac) / files.size
-                        updateModel(id) { it.copy(progress = overall.coerceIn(0f, 1f)) }
+                        updateModel(repo) { it.copy(progress = overall.coerceIn(0f, 1f)) }
                     }
                 }
-                updateModel(id) { it.copy(state = ModelState.INSTALLED, progress = 1f) }
+                updateModel(repo) { it.copy(state = ModelState.INSTALLED, downloadingFile = null, progress = 1f) }
                 LogBus.append("download complete: ${config.repo}")
             } catch (e: Exception) {
-                updateModel(id) { it.copy(state = ModelState.IDLE) }
+                updateModel(repo) { it.copy(state = ModelState.IDLE, downloadingFile = null) }
                 LogBus.append("download failed: ${e.message}")
+            }
+        }
+    }
+
+    // (`entry` above is `state.models.firstOrNull { it.id == repo }`, reused for the fit warning.)
+
+    /** Download a vision/draft companion and record it in [library]; wire it if its repo is active. */
+    fun downloadCompanion(repo: String, file: String, kind: CompanionKind) {
+        val entry = state.models.firstOrNull { it.id == repo }
+        if (entry?.downloadingFile != null) return
+        viewModelScope.launch {
+            updateModel(repo) { it.copy(downloadingFile = file, progress = 0f) }
+            try {
+                downloader.download(repo, file) { written, total ->
+                    val frac = if (total > 0) written.toFloat() / total else 0f
+                    updateModel(repo) { it.copy(progress = frac.coerceIn(0f, 1f)) }
+                }
+                val cfg = configRepo.load()
+                var next = cfg.copy(library = cfg.library + (file to repo))
+                // If this companion belongs to the currently active model's repo, wire it for next launch.
+                if (repo == cfg.repo) {
+                    next = when (kind) {
+                        CompanionKind.VISION -> next.copy(mmprojFile = file, useMmproj = true)
+                        CompanionKind.DRAFT -> next.copy(draftFile = file, useDraft = true)
+                    }
+                    LogBus.append("restart to apply ${if (kind == CompanionKind.VISION) "vision" else "draft"}")
+                }
+                configRepo.save(next)
+                updateModel(repo) { it.copy(downloadingFile = null, progress = 1f) }
+                if (repo == cfg.repo) {
+                    state = state.copy(settings = state.settings.copy(useDraft = next.useDraft, useMmproj = next.useMmproj))
+                }
+                LogBus.append("companion downloaded: $file")
+            } catch (e: Exception) {
+                updateModel(repo) { it.copy(downloadingFile = null) }
+                LogBus.append("companion download failed: ${e.message}")
             }
         }
     }

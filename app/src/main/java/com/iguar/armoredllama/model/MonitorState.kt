@@ -107,6 +107,7 @@ data class ModelEntry(
     val fit: ModelFit = ModelFit.UNKNOWN,
     val state: ModelState = ModelState.IDLE,
     val progress: Float = 0f, // 0..1
+    val downloadingFile: String? = null, // which file the DOWNLOADING state/progress refers to (null = headline)
     val freedGB: Float = 0f,  // on-disk GB a delete would free (primary + companions)
     val quants: List<QuantOption> = emptyList(),      // repo's quants (empty for local rows)
     val companions: List<CompanionOption> = emptyList(),

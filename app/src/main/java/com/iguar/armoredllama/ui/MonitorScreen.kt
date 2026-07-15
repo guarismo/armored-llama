@@ -53,6 +53,7 @@ fun MonitorScreen(vm: MonitorViewModel) {
                 onRemoveDownloadedUpdate = vm::removeDownloadedUpdate,
                 onUpdateHfQuery = vm::updateHfQuery,
                 onDownloadModel = vm::downloadModel,
+                onDownloadCompanion = vm::downloadCompanion,
                 onSwitchModel = vm::switchModel,
                 onDeleteModel = vm::deleteModel,
             ),
