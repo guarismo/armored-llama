@@ -43,6 +43,9 @@ import androidx.compose.ui.unit.dp
 import com.iguar.armoredllama.model.ModelEntry
 import com.iguar.armoredllama.model.ModelState
 import com.iguar.armoredllama.model.MonitorUiState
+import com.iguar.armoredllama.model.QuantOption
+import com.iguar.armoredllama.model.CompanionOption
+import com.iguar.armoredllama.server.CompanionKind
 import com.iguar.armoredllama.server.ModelFitLevel
 import com.iguar.armoredllama.model.UpdateStatus
 import com.iguar.armoredllama.ui.components.GradientBar
@@ -332,7 +335,9 @@ fun HfPanel(state: MonitorUiState, onBack: () -> Unit, callbacks: MenuCallbacks)
                     key(model.file) {
                         ModelCard(
                             model = model,
-                            onGet = { callbacks.onDownloadModel(model.repo, model.file) },
+                            local = local,
+                            onDownloadModel = callbacks.onDownloadModel,
+                            onDownloadCompanion = callbacks.onDownloadCompanion,
                             onSwitch = if (local) ({ callbacks.onSwitchModel(model.file) }) else null,
                             onDelete = if (local) ({ callbacks.onDeleteModel(model.file) }) else null,
                         )
@@ -376,104 +381,144 @@ private fun SearchField(query: String, onQueryChange: (String) -> Unit) {
 @Composable
 private fun ModelCard(
     model: ModelEntry,
-    onGet: () -> Unit,
+    local: Boolean,
+    onDownloadModel: (String, String) -> Unit,
+    onDownloadCompanion: (String, String, CompanionKind) -> Unit,
     onSwitch: (() -> Unit)? = null,
     onDelete: (() -> Unit)? = null,
 ) {
     val c = MonitorTheme.colors
     var confirmDelete by remember { mutableStateOf(false) }
-    Row(
+    var expanded by remember { mutableStateOf(false) }
+    val onGet = { onDownloadModel(model.repo, model.file) }
+    val extraQuants = model.quants.size > 1
+    val canExpand = !local && (extraQuants || model.companions.isNotEmpty())
+
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .panel(c.panel, c.border, 14.dp)
             .padding(14.dp),
-        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        model.name,
+                        style = MonitorType.bodyLabel,
+                        color = c.text,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    FitBadge(model)
+                }
+                Spacer(Modifier.height(2.dp))
+                val size = if (model.sizeGB > 0f) " · %.1f GB".format(model.sizeGB) else ""
                 Text(
-                    model.name,
-                    style = MonitorType.bodyLabel,
-                    color = c.text,
+                    "${model.repo} · ${model.quant}$size",
+                    style = MonitorType.monoCaption,
+                    color = c.muted,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
                 )
-                Spacer(Modifier.width(8.dp))
-                FitBadge(model)
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    model.file,
+                    style = MonitorType.monoCaption,
+                    color = c.muted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    model.fit.detail,
+                    style = MonitorType.monoCaption,
+                    color = when (model.fit.level) {
+                        ModelFitLevel.FITS -> c.good
+                        ModelFitLevel.TIGHT -> c.warn
+                        ModelFitLevel.TOO_LARGE -> c.bad
+                        ModelFitLevel.UNKNOWN -> c.muted
+                    },
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
-            Spacer(Modifier.height(2.dp))
-            val size = if (model.sizeGB > 0f) " · %.1f GB".format(model.sizeGB) else ""
+            Spacer(Modifier.width(12.dp))
+            when (model.state) {
+                ModelState.IDLE -> SmallButton("Get", c.accent, onGet)
+                ModelState.DOWNLOADING -> Column(horizontalAlignment = Alignment.End, modifier = Modifier.width(96.dp)) {
+                    Text("${(model.progress * 100).roundToInt()}%", style = MonitorType.monoCaption, color = c.accent)
+                    Spacer(Modifier.height(4.dp))
+                    GradientBar(
+                        fraction = model.progress,
+                        startColor = c.accent,
+                        endColor = c.accent2,
+                        trackColor = c.ringTrack,
+                        modifier = Modifier.fillMaxWidth().height(6.dp),
+                    )
+                }
+                ModelState.ACTIVE -> Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.Check, contentDescription = null, tint = c.good, modifier = Modifier.size(15.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("ACTIVE", style = MonitorType.monoCaption, color = c.good)
+                }
+                ModelState.INSTALLED -> if (onSwitch != null) {
+                    Column(horizontalAlignment = Alignment.End) {
+                        SmallButton("Use", c.accent, onSwitch)
+                        if (onDelete != null) {
+                            Spacer(Modifier.height(6.dp))
+                            Icon(
+                                Icons.Filled.Delete,
+                                contentDescription = "Delete ${model.file}",
+                                tint = c.bad,
+                                modifier = Modifier
+                                    .size(18.dp)
+                                    .clickable { confirmDelete = true },
+                            )
+                        }
+                    }
+                } else Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.Check, contentDescription = null, tint = c.good, modifier = Modifier.size(15.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Installed", style = MonitorType.monoCaption, color = c.good)
+                }
+            }
+        }
+
+        if (canExpand) {
+            Spacer(Modifier.height(10.dp))
             Text(
-                "${model.repo} · ${model.quant}$size",
+                text = if (expanded) "▾ hide quants" else "▸ ${model.quants.size} quants",
                 style = MonitorType.monoCaption,
-                color = c.muted,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(Modifier.height(2.dp))
-            Text(
-                model.file,
-                style = MonitorType.monoCaption,
-                color = c.muted,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(Modifier.height(2.dp))
-            Text(
-                model.fit.detail,
-                style = MonitorType.monoCaption,
-                color = when (model.fit.level) {
-                    ModelFitLevel.FITS -> c.good
-                    ModelFitLevel.TIGHT -> c.warn
-                    ModelFitLevel.TOO_LARGE -> c.bad
-                    ModelFitLevel.UNKNOWN -> c.muted
-                },
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+                color = c.accent,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable { expanded = !expanded }
+                    .padding(vertical = 4.dp),
             )
         }
-        Spacer(Modifier.width(12.dp))
-        when (model.state) {
-            ModelState.IDLE -> SmallButton("Get", c.accent, onGet)
-            ModelState.DOWNLOADING -> Column(horizontalAlignment = Alignment.End, modifier = Modifier.width(96.dp)) {
-                Text("${(model.progress * 100).roundToInt()}%", style = MonitorType.monoCaption, color = c.accent)
-                Spacer(Modifier.height(4.dp))
-                GradientBar(
-                    fraction = model.progress,
-                    startColor = c.accent,
-                    endColor = c.accent2,
-                    trackColor = c.ringTrack,
-                    modifier = Modifier.fillMaxWidth().height(6.dp),
-                )
+        if (expanded) {
+            Spacer(Modifier.height(8.dp))
+            model.quants.forEach { q ->
+                QuantRow(model = model, quant = q, onGet = { onDownloadModel(model.repo, q.file) })
             }
-            ModelState.ACTIVE -> Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Filled.Check, contentDescription = null, tint = c.good, modifier = Modifier.size(15.dp))
-                Spacer(Modifier.width(4.dp))
-                Text("ACTIVE", style = MonitorType.monoCaption, color = c.good)
-            }
-            ModelState.INSTALLED -> if (onSwitch != null) {
-                Column(horizontalAlignment = Alignment.End) {
-                    SmallButton("Use", c.accent, onSwitch)
-                    if (onDelete != null) {
-                        Spacer(Modifier.height(6.dp))
-                        Icon(
-                            Icons.Filled.Delete,
-                            contentDescription = "Delete ${model.file}",
-                            tint = c.bad,
-                            modifier = Modifier
-                                .size(18.dp)
-                                .clickable { confirmDelete = true },
-                        )
-                    }
+            if (model.companions.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                Text("─ Companions ─", style = MonitorType.monoCaption, color = c.muted)
+                Spacer(Modifier.height(6.dp))
+                model.companions.forEach { comp ->
+                    CompanionRow(
+                        model = model,
+                        companion = comp,
+                        onGet = { onDownloadCompanion(model.repo, comp.file, comp.kind) },
+                    )
                 }
-            } else Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Filled.Check, contentDescription = null, tint = c.good, modifier = Modifier.size(15.dp))
-                Spacer(Modifier.width(4.dp))
-                Text("Installed", style = MonitorType.monoCaption, color = c.good)
             }
         }
     }
+
     if (confirmDelete) {
         AlertDialog(
             onDismissRequest = { confirmDelete = false },
@@ -517,6 +562,71 @@ private fun FitBadge(model: ModelEntry) {
             color = color,
             maxLines = 1,
         )
+    }
+}
+
+@Composable
+private fun QuantRow(model: ModelEntry, quant: QuantOption, onGet: () -> Unit) {
+    val c = MonitorTheme.colors
+    val downloading = model.downloadingFile == quant.file
+    val installedFile = model.state != ModelState.IDLE && model.file == quant.file
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(quant.quant, style = MonitorType.bodyLabel, color = c.text)
+                Spacer(Modifier.width(8.dp))
+                Text("%.1f GB".format(quant.sizeGB), style = MonitorType.monoCaption, color = c.muted)
+                Spacer(Modifier.width(8.dp))
+                FitPill(quant.fit.level, quant.fit.label)
+            }
+        }
+        Spacer(Modifier.width(12.dp))
+        when {
+            downloading -> Text("${(model.progress * 100).roundToInt()}%", style = MonitorType.monoCaption, color = c.accent)
+            installedFile -> Text("Installed", style = MonitorType.monoCaption, color = c.good)
+            else -> SmallButton("Get", c.accent, onGet)
+        }
+    }
+}
+
+@Composable
+private fun CompanionRow(model: ModelEntry, companion: CompanionOption, onGet: () -> Unit) {
+    val c = MonitorTheme.colors
+    val downloading = model.downloadingFile == companion.file
+    val icon = if (companion.kind == CompanionKind.VISION) "👁" else "⚡"
+    val kindLabel = if (companion.kind == CompanionKind.VISION) "vision" else "draft"
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("$icon $kindLabel · ${companion.quant} · %.1f GB".format(companion.sizeGB),
+            style = MonitorType.monoCaption, color = c.muted, modifier = Modifier.weight(1f))
+        Spacer(Modifier.width(12.dp))
+        if (downloading) {
+            Text("${(model.progress * 100).roundToInt()}%", style = MonitorType.monoCaption, color = c.accent)
+        } else {
+            SmallButton("Get", c.accent, onGet)
+        }
+    }
+}
+
+@Composable
+private fun FitPill(level: ModelFitLevel, label: String) {
+    val c = MonitorTheme.colors
+    val color = when (level) {
+        ModelFitLevel.FITS -> c.good
+        ModelFitLevel.TIGHT -> c.warn
+        ModelFitLevel.TOO_LARGE -> c.bad
+        ModelFitLevel.UNKNOWN -> c.muted
+    }
+    Box(
+        modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(color.copy(alpha = 0.16f))
+            .padding(horizontal = 6.dp, vertical = 1.dp),
+    ) {
+        Text(label, style = MonitorType.monoCaption, color = color, maxLines = 1)
     }
 }
 
