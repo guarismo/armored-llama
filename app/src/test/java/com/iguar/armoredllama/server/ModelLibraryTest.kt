@@ -59,4 +59,15 @@ class ModelLibraryTest {
         assertEquals("unsloth/Qwen3.5-4B-GGUF", next.repo)
         assertEquals(cfg.library, next.library) // library passes through
     }
+
+    @Test fun quantFrom_recognizesLowBitAndKQuants() {
+        assertEquals("Q1_0", quantFrom("Bonsai-27B-Q1_0.gguf"))
+        assertEquals("IQ2_XXS", quantFrom("model-IQ2_XXS.gguf"))
+        assertEquals("IQ1_S", quantFrom("model-IQ1_S.gguf"))
+        assertEquals("Q2_K_S", quantFrom("model-Q2_K_S.gguf"))
+        assertEquals("Q2_K_XL", quantFrom("gemma-4-E2B-it-qat-UD-Q2_K_XL.gguf"))
+        assertEquals("Q4_K_M", quantFrom("model-Q4_K_M.gguf"))
+        assertEquals("BF16", quantFrom("model-mmproj-BF16.gguf"))
+        assertEquals("GGUF", quantFrom("model-unknownquant.gguf"))
+    }
 }

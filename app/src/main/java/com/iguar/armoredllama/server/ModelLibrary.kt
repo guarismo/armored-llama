@@ -2,11 +2,17 @@ package com.iguar.armoredllama.server
 
 /** Local model library logic: which files are primary models, and how switching rewrites config. */
 
-/** Companion (non-primary) GGUF: draft/mtp speculative models and mmproj vision projectors. */
-fun isCompanionFile(name: String): Boolean {
+/** Vision projector companion (mmproj). */
+fun isVisionFile(name: String): Boolean = "mmproj" in name.lowercase()
+
+/** Draft/speculative companion: draft, mtp, or dspark (Bonsai's DSpark drafter). */
+fun isDraftFile(name: String): Boolean {
     val n = name.lowercase()
-    return "mmproj" in n || "draft" in n || "mtp" in n
+    return "draft" in n || "mtp" in n || "dspark" in n
 }
+
+/** Companion (non-primary) GGUF: draft/mtp/dspark speculative models and mmproj vision projectors. */
+fun isCompanionFile(name: String): Boolean = isVisionFile(name) || isDraftFile(name)
 
 /** Filter (fileName, sizeBytes) pairs down to primary .gguf models. */
 fun primaryModels(files: List<Pair<String, Long>>): List<Pair<String, Long>> =
@@ -32,3 +38,21 @@ fun companionsOf(file: String): List<String> {
     val d = LlamaConfig()
     return if (file == d.modelFile) listOf(d.draftFile, d.mmprojFile).filter { it.isNotBlank() } else emptyList()
 }
+
+/**
+ * The quant label from a GGUF filename. Longest/most-specific tokens first so `Q4_K_M` wins over
+ * a bare `Q4` and `Q2_K_XL` over `Q2_K`. Unrecognized → "GGUF".
+ */
+fun quantFrom(name: String): String {
+    val upper = name.uppercase()
+    return QUANT_TOKENS.firstOrNull { it in upper } ?: "GGUF"
+}
+
+private val QUANT_TOKENS = listOf(
+    "IQ4_XS", "IQ4_NL", "IQ3_XXS", "IQ3_XS", "IQ3_M", "IQ3_S",
+    "IQ2_XXS", "IQ2_XS", "IQ2_M", "IQ2_S", "IQ1_M", "IQ1_S",
+    "Q5_K_M", "Q5_K_S", "Q4_K_M", "Q4_K_S", "Q3_K_L", "Q3_K_M", "Q3_K_S",
+    "Q2_K_XL", "Q2_K_S", "Q2_K",
+    "Q8_0", "Q6_K", "Q5_1", "Q5_0", "Q4_1", "Q4_0", "Q1_0",
+    "BF16", "FP16", "F16", "F32",
+)

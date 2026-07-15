@@ -13,63 +13,71 @@ import java.net.HttpURLConnection
 import java.net.URLEncoder
 import java.net.URL
 
-data class HfModelCandidate(
+enum class CompanionKind { VISION, DRAFT }
+
+data class QuantFile(val file: String, val quant: String, val sizeGB: Float)
+data class CompanionFile(val file: String, val kind: CompanionKind, val quant: String, val sizeGB: Float)
+
+/** One Hugging Face repo's downloadable GGUFs: primary quants (smallest→largest) and companions. */
+data class HfRepoResult(
     val repo: String,
     val name: String,
-    val file: String,
-    val quant: String,
-    val sizeGB: Float,
+    val quants: List<QuantFile>,
+    val companions: List<CompanionFile>,
 )
 
 object HfModels {
     private const val MAX_CONCURRENT_RESOLVES = 5
 
-    suspend fun search(query: String, limit: Int = 8): List<HfModelCandidate> = withContext(Dispatchers.IO) {
+    suspend fun searchRepos(query: String, limit: Int = 8): List<HfRepoResult> = withContext(Dispatchers.IO) {
         val q = URLEncoder.encode(query.trim().ifBlank { "GGUF" }, "UTF-8")
         val url = "https://huggingface.co/api/models?search=$q&filter=gguf&sort=downloads&direction=-1&limit=${limit * 2}"
         val repos = getJsonArray(url)
             .mapNotNull { it.optString("id").ifBlank { it.optString("modelId") }.ifBlank { null } }
             .distinct()
             .take(limit * 2)
-        // Resolve repos concurrently (bounded) — each candidate() is its own blocking round-trip;
-        // sequentially this was up to 16 fetches. awaitAll preserves the download-rank order.
+        // Resolve repos concurrently (bounded); each repoResult() is a blocking round-trip. awaitAll
+        // preserves the download-rank order.
         val gate = Semaphore(MAX_CONCURRENT_RESOLVES)
         val resolved = coroutineScope {
             repos.map { repo ->
-                async { gate.withPermit { runCatching { candidate(repo) }.getOrNull() } }
+                async { gate.withPermit { runCatching { repoResult(repo) }.getOrNull() } }
             }.awaitAll()
         }
         resolved.filterNotNull().take(limit)
     }
 
-    private fun candidate(repo: String): HfModelCandidate? {
-        // The tree endpoint carries per-file `size`; the /api/models siblings array does not.
+    private fun repoResult(repo: String): HfRepoResult? {
+        // The tree endpoint carries per-file `size` for every GGUF in one fetch.
         val tree = get("https://huggingface.co/api/models/${repo.encodePath()}/tree/main?recursive=true")
-        return parseCandidate(repo, tree)
+        return parseRepo(repo, tree)
     }
 
-    /** Pure: pick the best primary GGUF (skipping companions) from a HF /tree/main payload. */
-    internal fun parseCandidate(repo: String, treeJson: String): HfModelCandidate? {
+    /** Pure: split a HF /tree/main payload into primary quants + companions. Null if no primary GGUF. */
+    internal fun parseRepo(repo: String, treeJson: String): HfRepoResult? {
         val entries = JSONArray(treeJson)
-        val files = (0 until entries.length())
+        val ggufs = (0 until entries.length())
             .mapNotNull { entries.optJSONObject(it)?.toHfFile() }
             .filter { it.name.endsWith(".gguf", ignoreCase = true) }
-            .filterNot { isCompanionFile(it.name) }
-        val selected = files.minWithOrNull(compareBy<HfFile> { fileRank(it.name) }.thenBy { it.name.lowercase() })
-            ?: return null
-        val size = selected.sizeBytes?.let { it.toFloat() / (1024f * 1024f * 1024f) } ?: 0f
-        return HfModelCandidate(
-            repo = repo,
-            name = selected.name.substringBeforeLast("."),
-            file = selected.name,
-            quant = quantFrom(selected.name),
-            sizeGB = size,
-        )
+        fun gb(f: HfFile): Float = f.sizeBytes?.let { it.toFloat() / (1024f * 1024f * 1024f) } ?: 0f
+
+        val quants = ggufs.filterNot { isCompanionFile(it.name) }
+            .map { QuantFile(it.name, quantFrom(it.name), gb(it)) }
+            .sortedBy { it.sizeGB }
+        if (quants.isEmpty()) return null
+
+        val companions = ggufs.filter { isCompanionFile(it.name) }
+            .map { f ->
+                val kind = if (isVisionFile(f.name)) CompanionKind.VISION else CompanionKind.DRAFT
+                CompanionFile(f.name, kind, quantFrom(f.name), gb(f))
+            }
+            .sortedBy { it.sizeGB }
+
+        return HfRepoResult(repo = repo, name = repo.substringAfterLast('/'), quants = quants, companions = companions)
     }
 
     private fun getJsonArray(url: String): List<JSONObject> {
-        val text = get(url)
-        val arr = JSONArray(text)
+        val arr = JSONArray(get(url))
         return (0 until arr.length()).mapNotNull { arr.optJSONObject(it) }
     }
 
@@ -92,26 +100,6 @@ object HfModels {
 
     private fun String.encodePath(): String =
         split('/').joinToString("/") { URLEncoder.encode(it, "UTF-8") }
-
-    private fun fileRank(name: String): Int {
-        val n = name.uppercase()
-        return when {
-            "Q4_K_M" in n -> 0
-            "Q4_K_S" in n -> 1
-            "Q5_K_M" in n -> 2
-            "Q3_K_M" in n -> 3
-            "Q2_K" in n -> 4
-            "Q8_0" in n -> 5
-            "F16" in n || "FP16" in n -> 6
-            else -> 10
-        }
-    }
-
-    private fun quantFrom(name: String): String {
-        val upper = name.uppercase()
-        val candidates = listOf("Q4_K_M", "Q4_K_S", "Q5_K_M", "Q3_K_M", "Q2_K", "Q8_0", "F16", "FP16")
-        return candidates.firstOrNull { it in upper } ?: "GGUF"
-    }
 
     private data class HfFile(val name: String, val sizeBytes: Long?)
 

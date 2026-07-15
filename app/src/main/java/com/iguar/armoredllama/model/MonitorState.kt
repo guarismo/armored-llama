@@ -1,7 +1,9 @@
 package com.iguar.armoredllama.model
 
+import com.iguar.armoredllama.server.CompanionKind
 import com.iguar.armoredllama.server.LlamaServerService
 import com.iguar.armoredllama.server.ModelFit
+import com.iguar.armoredllama.server.ModelFitLevel
 
 /**
  * The state model from the README ("State Management"). Everything the UI renders lives here;
@@ -77,6 +79,21 @@ data class UpdateUi(
 
 enum class ModelState { IDLE, DOWNLOADING, INSTALLED, ACTIVE }
 
+/** One downloadable quant of a repo, with its per-file RAM fit. */
+data class QuantOption(val file: String, val quant: String, val sizeGB: Float, val fit: ModelFit)
+
+/** One downloadable companion (vision/draft) of a repo. Size only — fit is about the primary. */
+data class CompanionOption(val file: String, val kind: CompanionKind, val quant: String, val sizeGB: Float)
+
+/**
+ * The recommended quant to headline: the largest whose fit is FITS/TIGHT, else the smallest.
+ * Null when [quants] is empty.
+ */
+fun pickHeadline(quants: List<QuantOption>): QuantOption? =
+    quants.filter { it.fit.level == ModelFitLevel.FITS || it.fit.level == ModelFitLevel.TIGHT }
+        .maxByOrNull { it.sizeGB }
+        ?: quants.minByOrNull { it.sizeGB }
+
 /** A Hugging Face GGUF entry; INSTALLED means the selected file is present on disk. */
 data class ModelEntry(
     val id: String,
@@ -91,6 +108,8 @@ data class ModelEntry(
     val state: ModelState = ModelState.IDLE,
     val progress: Float = 0f, // 0..1
     val freedGB: Float = 0f,  // on-disk GB a delete would free (primary + companions)
+    val quants: List<QuantOption> = emptyList(),      // repo's quants (empty for local rows)
+    val companions: List<CompanionOption> = emptyList(),
 )
 
 /** The full UI state, parent-owned (per README). */

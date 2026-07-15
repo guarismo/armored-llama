@@ -25,9 +25,11 @@ import com.iguar.armoredllama.server.isServerIdle
 import com.iguar.armoredllama.server.isNewer
 import com.iguar.armoredllama.server.parseThroughput
 import com.iguar.armoredllama.server.primaryModels
+import com.iguar.armoredllama.server.quantFrom
 import com.iguar.armoredllama.server.switchedConfig
 import kotlinx.coroutines.flow.collect
 import com.iguar.armoredllama.device.DeviceTelemetry
+import com.iguar.armoredllama.model.CompanionOption
 import com.iguar.armoredllama.model.CORE_COUNT
 import com.iguar.armoredllama.model.HISTORY_SIZE
 import com.iguar.armoredllama.model.Histories
@@ -35,6 +37,8 @@ import com.iguar.armoredllama.model.ModelEntry
 import com.iguar.armoredllama.model.ModelState
 import com.iguar.armoredllama.model.MonitorUiState
 import com.iguar.armoredllama.model.Panel
+import com.iguar.armoredllama.model.pickHeadline
+import com.iguar.armoredllama.model.QuantOption
 import com.iguar.armoredllama.model.ServerSettings
 import com.iguar.armoredllama.model.UpdateStatus
 import com.iguar.armoredllama.model.UpdateUi
@@ -370,24 +374,38 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val freeRamMB = state.metrics.ramFree
                 val settings = state.settings
-                val results = HfModels.search(q).map { candidate ->
-                    val installed = downloader.localSize(candidate.file) > 0L
+                val results = HfModels.searchRepos(q).map { repo ->
+                    val quantOptions = repo.quants.map { qf ->
+                        QuantOption(
+                            file = qf.file,
+                            quant = qf.quant,
+                            sizeGB = qf.sizeGB,
+                            fit = estimateModelFit(
+                                modelSizeGB = qf.sizeGB,
+                                freeRamMB = freeRamMB,
+                                ctx = settings.ctx,
+                                cacheTypeK = settings.cacheTypeK,
+                                cacheTypeV = settings.cacheTypeV,
+                                flashAttn = settings.flashAttn,
+                            ),
+                        )
+                    }
+                    val companionOptions = repo.companions.map {
+                        CompanionOption(it.file, it.kind, it.quant, it.sizeGB)
+                    }
+                    val headline = pickHeadline(quantOptions) ?: quantOptions.first()
+                    val installed = downloader.localSize(headline.file) > 0L
                     ModelEntry(
-                        id = candidate.repo,
-                        repo = candidate.repo,
-                        name = candidate.name,
-                        file = candidate.file,
-                        quant = candidate.quant,
-                        sizeGB = candidate.sizeGB,
-                        fit = estimateModelFit(
-                            modelSizeGB = candidate.sizeGB,
-                            freeRamMB = freeRamMB,
-                            ctx = settings.ctx,
-                            cacheTypeK = settings.cacheTypeK,
-                            cacheTypeV = settings.cacheTypeV,
-                            flashAttn = settings.flashAttn,
-                        ),
+                        id = repo.repo,
+                        repo = repo.repo,
+                        name = repo.name,
+                        file = headline.file,
+                        quant = headline.quant,
+                        sizeGB = headline.sizeGB,
+                        fit = headline.fit,
                         state = if (installed) ModelState.INSTALLED else ModelState.IDLE,
+                        quants = quantOptions,
+                        companions = companionOptions,
                     )
                 }.sortedWith(compareBy<ModelEntry> { fitRank(it.fit.level) }.thenBy { it.sizeGB })
                 state = state.copy(
@@ -622,13 +640,6 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
 
 /** Round a float to a whole number for display. */
 fun Float.toIntDisplay(): Int = this.roundToInt()
-
-private fun quantFrom(file: String): String {
-    val upper = file.uppercase()
-    return listOf("Q4_K_M", "Q4_K_S", "Q5_K_M", "Q3_K_M", "Q2_K_XL", "Q2_K", "Q8_0", "F16", "FP16")
-        .firstOrNull { it in upper }
-        ?: "GGUF"
-}
 
 private fun fitRank(level: ModelFitLevel): Int = when (level) {
     ModelFitLevel.FITS -> 0
