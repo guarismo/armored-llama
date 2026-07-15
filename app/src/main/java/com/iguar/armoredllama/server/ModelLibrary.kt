@@ -19,8 +19,22 @@ fun primaryModels(files: List<Pair<String, Long>>): List<Pair<String, Long>> =
     files.filter { (name, _) -> name.endsWith(".gguf", ignoreCase = true) && !isCompanionFile(name) }
 
 /**
+ * The (draft, mmproj) companion files recorded in [library] for [repo], excluding [self].
+ * Blank strings when [repo] is blank or the repo has no companion of that kind. When a repo has
+ * several of one kind, the first (map-insertion order) is used.
+ */
+fun companionFilesForRepo(library: Map<String, String>, repo: String, self: String): Pair<String, String> {
+    if (repo.isBlank()) return "" to ""
+    val siblings = library.filterValues { it == repo }.keys.filter { it != self && isCompanionFile(it) }
+    val draft = siblings.firstOrNull { isDraftFile(it) } ?: ""
+    val mmproj = siblings.firstOrNull { isVisionFile(it) } ?: ""
+    return draft to mmproj
+}
+
+/**
  * The config after switching to [file]. The curated default model restores its full profile
- * (repo + draft + mmproj from [LlamaConfig] defaults); any other file clears the companions.
+ * (repo + draft + mmproj from [LlamaConfig] defaults); any other file derives its companions from
+ * the repo recorded in [LlamaConfig.library].
  * Feature toggles follow the files; server settings pass through untouched.
  */
 fun switchedConfig(cfg: LlamaConfig, file: String): LlamaConfig {
@@ -28,7 +42,9 @@ fun switchedConfig(cfg: LlamaConfig, file: String): LlamaConfig {
     val next = if (file == d.modelFile) {
         cfg.copy(repo = d.repo, modelFile = d.modelFile, draftFile = d.draftFile, mmprojFile = d.mmprojFile)
     } else {
-        cfg.copy(repo = cfg.library[file] ?: "", modelFile = file, draftFile = "", mmprojFile = "")
+        val repo = cfg.library[file] ?: ""
+        val (draft, mmproj) = companionFilesForRepo(cfg.library, repo, file)
+        cfg.copy(repo = repo, modelFile = file, draftFile = draft, mmprojFile = mmproj)
     }
     return next.copy(useDraft = next.draftFile.isNotBlank(), useMmproj = next.mmprojFile.isNotBlank())
 }

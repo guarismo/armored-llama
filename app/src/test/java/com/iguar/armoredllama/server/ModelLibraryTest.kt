@@ -60,6 +60,44 @@ class ModelLibraryTest {
         assertEquals(cfg.library, next.library) // library passes through
     }
 
+    @Test fun companionFilesForRepo_findsDraftAndMmprojExcludingSelf() {
+        val library = mapOf(
+            "Bonsai-27B-Q1_0.gguf" to "prism-ml/Bonsai-27B-gguf",
+            "Bonsai-27B-mmproj-Q8_0.gguf" to "prism-ml/Bonsai-27B-gguf",
+            "Bonsai-27B-dspark-Q4_1.gguf" to "prism-ml/Bonsai-27B-gguf",
+            "Other-Q4_K_M.gguf" to "acme/other-GGUF",
+        )
+
+        val (draft, mmproj) = companionFilesForRepo(library, "prism-ml/Bonsai-27B-gguf", "Bonsai-27B-Q1_0.gguf")
+
+        assertEquals("Bonsai-27B-dspark-Q4_1.gguf", draft)
+        assertEquals("Bonsai-27B-mmproj-Q8_0.gguf", mmproj)
+    }
+
+    @Test fun companionFilesForRepo_blankWhenRepoBlankOrNoCompanions() {
+        assertEquals("" to "", companionFilesForRepo(emptyMap(), "", "x.gguf"))
+        val lib = mapOf("Other-Q4_K_M.gguf" to "acme/other-GGUF")
+        assertEquals("" to "", companionFilesForRepo(lib, "acme/other-GGUF", "Other-Q4_K_M.gguf"))
+    }
+
+    @Test fun switchedConfig_wiresCompanionsFromLibraryByRepo() {
+        val cfg = LlamaConfig(
+            library = mapOf(
+                "Bonsai-27B-Q1_0.gguf" to "prism-ml/Bonsai-27B-gguf",
+                "Bonsai-27B-mmproj-Q8_0.gguf" to "prism-ml/Bonsai-27B-gguf",
+            ),
+        )
+
+        val next = switchedConfig(cfg, "Bonsai-27B-Q1_0.gguf")
+
+        assertEquals("prism-ml/Bonsai-27B-gguf", next.repo)
+        assertEquals("Bonsai-27B-Q1_0.gguf", next.modelFile)
+        assertEquals("", next.draftFile)
+        assertEquals("Bonsai-27B-mmproj-Q8_0.gguf", next.mmprojFile)
+        assertEquals(false, next.useDraft)
+        assertEquals(true, next.useMmproj)
+    }
+
     @Test fun quantFrom_recognizesLowBitAndKQuants() {
         assertEquals("Q1_0", quantFrom("Bonsai-27B-Q1_0.gguf"))
         assertEquals("IQ2_XXS", quantFrom("model-IQ2_XXS.gguf"))
