@@ -14,7 +14,7 @@
 - **No new config field.** Companion persistence reuses `LlamaConfig.library: Map<String,String>` (file → repo) and its existing `[library]` INI serialization.
 - **Headline quant** = the largest quant whose `ModelFit.level` is `FITS` or `TIGHT`; if none qualify, the smallest quant (by `sizeGB`).
 - **Expanded quant rows** are ordered **smallest → largest** by `sizeGB`.
-- Companions (`mmproj`=VISION, `draft`/`mtp`=DRAFT) show **size only, no fit badge**.
+- Companions (`mmproj`=VISION; `draft`/`mtp`/`dspark`=DRAFT) show **size only, no fit badge**. Companion-token detection is single-source in `ModelLibrary.kt` via `isVisionFile`/`isDraftFile`, with `isCompanionFile = isVisionFile || isDraftFile`. (`dspark` is Bonsai's DSpark speculative drafter — confirmed a draft model.)
 - Downloading a companion does **not** auto-restart the server (unlike a model switch); it logs `restart to apply <vision|draft>` when it wires into the active model.
 - Deleting a primary does **not** cascade-delete shared companions (`companionsOf` unchanged).
 - The local "On this phone" list is unchanged — installed files stay one row each (empty `quants`/`companions`).
@@ -260,13 +260,8 @@ object HfModels {
         if (quants.isEmpty()) return null
 
         val companions = ggufs.filter { isCompanionFile(it.name) }
-            .mapNotNull { f ->
-                val n = f.name.lowercase()
-                val kind = when {
-                    "mmproj" in n -> CompanionKind.VISION
-                    "draft" in n || "mtp" in n -> CompanionKind.DRAFT
-                    else -> null
-                } ?: return@mapNotNull null
+            .map { f ->
+                val kind = if (isVisionFile(f.name)) CompanionKind.VISION else CompanionKind.DRAFT
                 CompanionFile(f.name, kind, quantFrom(f.name), gb(f))
             }
             .sortedBy { it.sizeGB }
@@ -556,8 +551,8 @@ In `app/src/main/java/com/iguar/armoredllama/server/ModelLibrary.kt`, add:
 fun companionFilesForRepo(library: Map<String, String>, repo: String, self: String): Pair<String, String> {
     if (repo.isBlank()) return "" to ""
     val siblings = library.filterValues { it == repo }.keys.filter { it != self && isCompanionFile(it) }
-    val draft = siblings.firstOrNull { "draft" in it.lowercase() || "mtp" in it.lowercase() } ?: ""
-    val mmproj = siblings.firstOrNull { "mmproj" in it.lowercase() } ?: ""
+    val draft = siblings.firstOrNull { isDraftFile(it) } ?: ""
+    val mmproj = siblings.firstOrNull { isVisionFile(it) } ?: ""
     return draft to mmproj
 }
 ```
