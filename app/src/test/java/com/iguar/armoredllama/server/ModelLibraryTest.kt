@@ -111,4 +111,16 @@ class ModelLibraryTest {
         assertEquals("BF16", quantFrom("model-mmproj-BF16.gguf"))
         assertEquals("GGUF", quantFrom("model-unknownquant.gguf"))
     }
+
+    @Test fun quantFrom_recognizesKQuantLXlAndTernaryVariants() {
+        // "_L"/"_XL" K-quant variants must beat their base token (e.g. Q6_K_L over Q6_K).
+        assertEquals("Q6_K_L", quantFrom("model-Q6_K_L.gguf"))
+        assertEquals("Q5_K_L", quantFrom("model-Q5_K_L.gguf"))
+        assertEquals("Q4_K_XL", quantFrom("model-UD-Q4_K_XL.gguf"))
+        assertEquals("Q3_K_XL", quantFrom("model-Q3_K_XL.gguf"))
+        assertEquals("IQ4_XXS", quantFrom("model-IQ4_XXS.gguf"))
+        assertEquals("TQ1_0", quantFrom("model-TQ1_0.gguf"))
+        // Bases still resolve when no longer-variant is present.
+        assertEquals("Q6_K", quantFrom("model-Q6_K.gguf"))
+    }
 }

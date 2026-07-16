@@ -445,11 +445,6 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
             useMmproj = mmproj.isNotBlank(),
             library = prev.library + (file to repo),
         )
-        configRepo.save(config)
-        state = state.copy(
-            modelFile = file.substringBeforeLast(".").takeUnless { it.isBlank() } ?: file,
-            settings = state.settings.copy(useDraft = config.useDraft, useMmproj = config.useMmproj),
-        )
         // Only fetch files not already on disk (curated companions download; derived ones are present).
         val files = listOf(config.modelFile, config.draftFile, config.mmprojFile)
             .filter { it.isNotBlank() && downloader.localSize(it) <= 0L }
@@ -457,8 +452,18 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
         if (fit != null && (fit.level == ModelFitLevel.TIGHT || fit.level == ModelFitLevel.TOO_LARGE)) {
             LogBus.append("RAM warning before download: ${fit.label.lowercase()} for $file; ${fit.detail}")
         }
+        // Make this the active model only once its files are present — persisting up front would leave
+        // config.ini pointing at a missing/partial model if the download fails or is never finished.
+        fun activate() {
+            configRepo.save(config)
+            state = state.copy(
+                modelFile = file.substringBeforeLast(".").takeUnless { it.isBlank() } ?: file,
+                settings = state.settings.copy(useDraft = config.useDraft, useMmproj = config.useMmproj),
+            )
+        }
         viewModelScope.launch {
             if (files.isEmpty()) {
+                activate()
                 updateModel(repo) { it.installedWith(file) }
                 return@launch
             }
@@ -471,9 +476,11 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
                         updateModel(repo) { it.copy(progress = overall.coerceIn(0f, 1f)) }
                     }
                 }
+                activate()
                 updateModel(repo) { it.installedWith(file) }
                 LogBus.append("download complete: ${config.repo}")
             } catch (e: Exception) {
+                // config.ini untouched — the previously active model stays selected.
                 updateModel(repo) { it.copy(state = ModelState.IDLE, downloadingFile = null) }
                 LogBus.append("download failed: ${e.message}")
             }

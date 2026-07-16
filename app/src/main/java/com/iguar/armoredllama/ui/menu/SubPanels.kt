@@ -468,7 +468,10 @@ private fun ModelCard(
             }
             Spacer(Modifier.width(12.dp))
             when (model.state) {
-                ModelState.IDLE -> SmallButton("Get", c.accent, onGet)
+                // A quant/companion on this card is downloading — keep the headline action inert.
+                ModelState.IDLE -> if (model.downloadingFile != null) {
+                    Text("Get", style = MonitorType.button, color = c.muted)
+                } else SmallButton("Get", c.accent, onGet)
                 ModelState.DOWNLOADING -> Column(horizontalAlignment = Alignment.End, modifier = Modifier.width(96.dp)) {
                     Text("${(model.progress * 100).roundToInt()}%", style = MonitorType.monoCaption, color = c.accent)
                     Spacer(Modifier.height(4.dp))
