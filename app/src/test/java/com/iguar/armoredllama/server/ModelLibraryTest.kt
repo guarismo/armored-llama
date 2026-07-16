@@ -60,7 +60,7 @@ class ModelLibraryTest {
         assertEquals(cfg.library, next.library) // library passes through
     }
 
-    @Test fun companionFilesForRepo_findsDraftAndMmprojExcludingSelf() {
+    @Test fun mmprojForRepo_findsVisionExcludingSelf() {
         val library = mapOf(
             "Bonsai-27B-Q1_0.gguf" to "prism-ml/Bonsai-27B-gguf",
             "Bonsai-27B-mmproj-Q8_0.gguf" to "prism-ml/Bonsai-27B-gguf",
@@ -68,23 +68,26 @@ class ModelLibraryTest {
             "Other-Q4_K_M.gguf" to "acme/other-GGUF",
         )
 
-        val (draft, mmproj) = companionFilesForRepo(library, "prism-ml/Bonsai-27B-gguf", "Bonsai-27B-Q1_0.gguf")
-
-        assertEquals("Bonsai-27B-dspark-Q4_1.gguf", draft)
-        assertEquals("Bonsai-27B-mmproj-Q8_0.gguf", mmproj)
+        assertEquals(
+            "Bonsai-27B-mmproj-Q8_0.gguf",
+            mmprojForRepo(library, "prism-ml/Bonsai-27B-gguf", "Bonsai-27B-Q1_0.gguf"),
+        )
     }
 
-    @Test fun companionFilesForRepo_blankWhenRepoBlankOrNoCompanions() {
-        assertEquals("" to "", companionFilesForRepo(emptyMap(), "", "x.gguf"))
+    @Test fun mmprojForRepo_blankWhenRepoBlankOrNoVision() {
+        assertEquals("", mmprojForRepo(emptyMap(), "", "x.gguf"))
         val lib = mapOf("Other-Q4_K_M.gguf" to "acme/other-GGUF")
-        assertEquals("" to "", companionFilesForRepo(lib, "acme/other-GGUF", "Other-Q4_K_M.gguf"))
+        assertEquals("", mmprojForRepo(lib, "acme/other-GGUF", "Other-Q4_K_M.gguf"))
     }
 
-    @Test fun switchedConfig_wiresCompanionsFromLibraryByRepo() {
+    @Test fun switchedConfig_wiresMmprojButNeverDraftForArbitrary() {
+        // Even with a draft recorded in [library], switching to an arbitrary model wires ONLY the
+        // vision projector — drafts are unsupported on-device and would crash the server.
         val cfg = LlamaConfig(
             library = mapOf(
                 "Bonsai-27B-Q1_0.gguf" to "prism-ml/Bonsai-27B-gguf",
                 "Bonsai-27B-mmproj-Q8_0.gguf" to "prism-ml/Bonsai-27B-gguf",
+                "Bonsai-27B-dspark-Q4_1.gguf" to "prism-ml/Bonsai-27B-gguf",
             ),
         )
 

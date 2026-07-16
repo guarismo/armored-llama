@@ -1,6 +1,5 @@
 package com.iguar.armoredllama.model
 
-import com.iguar.armoredllama.server.CompanionKind
 import com.iguar.armoredllama.server.LlamaServerService
 import com.iguar.armoredllama.server.ModelFit
 import com.iguar.armoredllama.server.ModelFitLevel
@@ -82,8 +81,8 @@ enum class ModelState { IDLE, DOWNLOADING, INSTALLED, ACTIVE }
 /** One downloadable quant of a repo, with its per-file RAM fit. */
 data class QuantOption(val file: String, val quant: String, val sizeGB: Float, val fit: ModelFit)
 
-/** One downloadable companion (vision/draft) of a repo. Size only — fit is about the primary. */
-data class CompanionOption(val file: String, val kind: CompanionKind, val quant: String, val sizeGB: Float)
+/** One downloadable vision projector (mmproj) of a repo. Size only — fit is about the primary. */
+data class CompanionOption(val file: String, val quant: String, val sizeGB: Float)
 
 /**
  * The recommended quant to headline: the largest whose fit is FITS/TIGHT, else the smallest.

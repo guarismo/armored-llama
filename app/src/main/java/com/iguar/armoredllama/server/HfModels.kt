@@ -13,12 +13,12 @@ import java.net.HttpURLConnection
 import java.net.URLEncoder
 import java.net.URL
 
-enum class CompanionKind { VISION, DRAFT }
-
 data class QuantFile(val file: String, val quant: String, val sizeGB: Float)
-data class CompanionFile(val file: String, val kind: CompanionKind, val quant: String, val sizeGB: Float)
 
-/** One Hugging Face repo's downloadable GGUFs: primary quants (smallest→largest) and companions. */
+/** A downloadable vision projector (mmproj). Drafts are intentionally not surfaced (see [parseRepo]). */
+data class CompanionFile(val file: String, val quant: String, val sizeGB: Float)
+
+/** One Hugging Face repo's downloadable GGUFs: primary quants (smallest→largest) and vision companions. */
 data class HfRepoResult(
     val repo: String,
     val name: String,
@@ -66,11 +66,13 @@ object HfModels {
             .sortedBy { it.sizeGB }
         if (quants.isEmpty()) return null
 
-        val companions = ggufs.filter { isCompanionFile(it.name) }
-            .map { f ->
-                val kind = if (isVisionFile(f.name)) CompanionKind.VISION else CompanionKind.DRAFT
-                CompanionFile(f.name, kind, quantFrom(f.name), gb(f))
-            }
+        // Vision (mmproj) companions only. Draft/speculative companions (draft/mtp/dspark) are excluded
+        // from the quants above by isCompanionFile AND not surfaced here: the on-device CPU build gains
+        // little from speculative decoding, and custom drafters (e.g. Bonsai's dspark) are an unknown
+        // architecture that makes llama-server exit on load. The curated default's MTP draft is wired
+        // separately in switchedConfig, not through this path.
+        val companions = ggufs.filter { isVisionFile(it.name) }
+            .map { f -> CompanionFile(f.name, quantFrom(f.name), gb(f)) }
             .sortedBy { it.sizeGB }
 
         return HfRepoResult(repo = repo, name = repo.substringAfterLast('/'), quants = quants, companions = companions)

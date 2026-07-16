@@ -8,8 +8,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import android.os.Build
 import android.provider.Settings
-import com.iguar.armoredllama.server.CompanionKind
-import com.iguar.armoredllama.server.companionFilesForRepo
+import com.iguar.armoredllama.server.mmprojForRepo
 import com.iguar.armoredllama.server.ConfigRepository
 import com.iguar.armoredllama.server.GithubReleases
 import com.iguar.armoredllama.server.HfModels
@@ -393,7 +392,7 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
                         )
                     }
                     val companionOptions = repo.companions.map {
-                        CompanionOption(it.file, it.kind, it.quant, it.sizeGB)
+                        CompanionOption(it.file, it.quant, it.sizeGB)
                     }
                     val headline = pickHeadline(quantOptions) ?: quantOptions.first()
                     val installed = downloader.localSize(headline.file) > 0L
@@ -429,14 +428,14 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
         val entry = state.models.firstOrNull { it.id == repo }
         if (entry?.downloadingFile != null) return
         val d = LlamaConfig()
-        // Curated default brings its bundled companions; any other repo derives them from [library].
+        val prev = configRepo.load()
+        // Curated default brings its bundled draft+mmproj; any other repo derives only its vision
+        // projector (drafts stay unwired — the on-device build cannot run arbitrary drafters).
         val (draft, mmproj) = if (repo == d.repo && file == d.modelFile) {
             d.draftFile to d.mmprojFile
         } else {
-            val prevLib = configRepo.load().library
-            companionFilesForRepo(prevLib, repo, file)
+            "" to mmprojForRepo(prev.library, repo, file)
         }
-        val prev = configRepo.load()
         val config = prev.copy(
             repo = repo,
             modelFile = file,
@@ -460,7 +459,7 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
         }
         viewModelScope.launch {
             if (files.isEmpty()) {
-                updateModel(repo) { it.copy(state = ModelState.INSTALLED, downloadingFile = null, progress = 1f) }
+                updateModel(repo) { it.installedWith(file) }
                 return@launch
             }
             updateModel(repo) { it.copy(state = ModelState.DOWNLOADING, downloadingFile = file, progress = 0f) }
@@ -472,7 +471,7 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
                         updateModel(repo) { it.copy(progress = overall.coerceIn(0f, 1f)) }
                     }
                 }
-                updateModel(repo) { it.copy(state = ModelState.INSTALLED, downloadingFile = null, progress = 1f) }
+                updateModel(repo) { it.installedWith(file) }
                 LogBus.append("download complete: ${config.repo}")
             } catch (e: Exception) {
                 updateModel(repo) { it.copy(state = ModelState.IDLE, downloadingFile = null) }
@@ -483,8 +482,8 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
 
     // (`entry` above is `state.models.firstOrNull { it.id == repo }`, reused for the fit warning.)
 
-    /** Download a vision/draft companion and record it in [library]; wire it if its repo is active. */
-    fun downloadCompanion(repo: String, file: String, kind: CompanionKind) {
+    /** Download a vision projector (mmproj) and record it in [library]; wire it if its repo is active. */
+    fun downloadCompanion(repo: String, file: String) {
         val entry = state.models.firstOrNull { it.id == repo }
         if (entry?.downloadingFile != null) return
         viewModelScope.launch {
@@ -496,18 +495,15 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 val cfg = configRepo.load()
                 var next = cfg.copy(library = cfg.library + (file to repo))
-                // If this companion belongs to the currently active model's repo, wire it for next launch.
+                // If this projector belongs to the currently active model's repo, wire it for next launch.
                 if (repo == cfg.repo) {
-                    next = when (kind) {
-                        CompanionKind.VISION -> next.copy(mmprojFile = file, useMmproj = true)
-                        CompanionKind.DRAFT -> next.copy(draftFile = file, useDraft = true)
-                    }
-                    LogBus.append("restart to apply ${if (kind == CompanionKind.VISION) "vision" else "draft"}")
+                    next = next.copy(mmprojFile = file, useMmproj = true)
+                    LogBus.append("restart to apply vision")
                 }
                 configRepo.save(next)
                 updateModel(repo) { it.copy(downloadingFile = null, progress = 1f) }
                 if (repo == cfg.repo) {
-                    state = state.copy(settings = state.settings.copy(useDraft = next.useDraft, useMmproj = next.useMmproj))
+                    state = state.copy(settings = state.settings.copy(useMmproj = next.useMmproj))
                 }
                 LogBus.append("companion downloaded: $file")
             } catch (e: Exception) {
@@ -519,6 +515,20 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun updateModel(id: String, transform: (ModelEntry) -> ModelEntry) {
         state = state.copy(models = state.models.map { if (it.id == id) transform(it) else it })
+    }
+
+    /** Mark a repo card INSTALLED and promote the just-downloaded [file] to its headline quant. */
+    private fun ModelEntry.installedWith(file: String): ModelEntry {
+        val q = quants.firstOrNull { it.file == file }
+        return copy(
+            state = ModelState.INSTALLED,
+            downloadingFile = null,
+            progress = 1f,
+            file = file,
+            quant = q?.quant ?: quant,
+            sizeGB = q?.sizeGB ?: sizeGB,
+            fit = q?.fit ?: fit,
+        )
     }
 
     // Local model switching (blank-search list) ------------------------------------------------

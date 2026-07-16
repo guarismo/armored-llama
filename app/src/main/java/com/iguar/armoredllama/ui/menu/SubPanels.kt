@@ -45,7 +45,6 @@ import com.iguar.armoredllama.model.ModelState
 import com.iguar.armoredllama.model.MonitorUiState
 import com.iguar.armoredllama.model.QuantOption
 import com.iguar.armoredllama.model.CompanionOption
-import com.iguar.armoredllama.server.CompanionKind
 import com.iguar.armoredllama.server.ModelFitLevel
 import com.iguar.armoredllama.model.UpdateStatus
 import com.iguar.armoredllama.ui.components.GradientBar
@@ -213,6 +212,7 @@ fun ReleasePanel(state: MonitorUiState, onBack: () -> Unit, callbacks: MenuCallb
 
             val latest = u.latest
             if (latest != null) {
+                var notesExpanded by remember { mutableStateOf(false) }
                 Column(modifier = Modifier.fillMaxWidth().panel(c.panel, c.border, 16.dp).padding(16.dp)) {
                     val upToDate = u.status == UpdateStatus.UP_TO_DATE
                     val badge = if (upToDate) "up to date" else "available"
@@ -234,11 +234,32 @@ fun ReleasePanel(state: MonitorUiState, onBack: () -> Unit, callbacks: MenuCallb
                     Text(latest.date, style = MonitorType.monoCaption, color = c.muted)
                     if (latest.notes.isNotBlank()) {
                         Spacer(Modifier.height(8.dp))
-                        Text(
-                            latest.notes.take(400),
-                            style = MonitorType.bodyLabel,
-                            color = c.text,
-                        )
+                        if (notesExpanded) {
+                            Text(
+                                latest.notes,
+                                style = MonitorType.bodyLabel,
+                                color = c.text,
+                            )
+                        } else {
+                            Text(
+                                latest.notes,
+                                style = MonitorType.bodyLabel,
+                                color = c.text,
+                                maxLines = 12,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        if (latest.notes.length > 200) {
+                            Text(
+                                text = if (notesExpanded) "Show less" else "Show more",
+                                style = MonitorType.monoCaption,
+                                color = c.accent,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .clickable { notesExpanded = !notesExpanded }
+                                    .padding(vertical = 4.dp),
+                            )
+                        }
                     }
                 }
             }
@@ -383,7 +404,7 @@ private fun ModelCard(
     model: ModelEntry,
     local: Boolean,
     onDownloadModel: (String, String) -> Unit,
-    onDownloadCompanion: (String, String, CompanionKind) -> Unit,
+    onDownloadCompanion: (String, String) -> Unit,
     onSwitch: (() -> Unit)? = null,
     onDelete: (() -> Unit)? = null,
 ) {
@@ -506,13 +527,13 @@ private fun ModelCard(
             }
             if (model.companions.isNotEmpty()) {
                 Spacer(Modifier.height(8.dp))
-                Text("─ Companions ─", style = MonitorType.monoCaption, color = c.muted)
+                Text("─ Vision ─", style = MonitorType.monoCaption, color = c.muted)
                 Spacer(Modifier.height(6.dp))
                 model.companions.forEach { comp ->
                     CompanionRow(
                         model = model,
                         companion = comp,
-                        onGet = { onDownloadCompanion(model.repo, comp.file, comp.kind) },
+                        onGet = { onDownloadCompanion(model.repo, comp.file) },
                     )
                 }
             }
@@ -596,13 +617,11 @@ private fun QuantRow(model: ModelEntry, quant: QuantOption, onGet: () -> Unit) {
 private fun CompanionRow(model: ModelEntry, companion: CompanionOption, onGet: () -> Unit) {
     val c = MonitorTheme.colors
     val downloading = model.downloadingFile == companion.file
-    val icon = if (companion.kind == CompanionKind.VISION) "👁" else "⚡"
-    val kindLabel = if (companion.kind == CompanionKind.VISION) "vision" else "draft"
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("$icon $kindLabel · ${companion.quant} · %.1f GB".format(companion.sizeGB),
+        Text("👁 vision · ${companion.quant} · %.1f GB".format(companion.sizeGB),
             style = MonitorType.monoCaption, color = c.muted, modifier = Modifier.weight(1f))
         Spacer(Modifier.width(12.dp))
         if (downloading) {

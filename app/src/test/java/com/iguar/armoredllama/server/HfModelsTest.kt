@@ -27,14 +27,18 @@ class HfModelsTest {
         assertEquals(3803452480f / (1024f * 1024f * 1024f), r.quants[0].sizeGB, 0.01f)
     }
 
-    @Test fun parseRepo_classifiesCompanionsAndKeepsThemOutOfQuants() {
+    @Test fun parseRepo_companionsAreVisionOnly_draftsExcludedEverywhere() {
         val r = HfModels.parseRepo("prism-ml/Bonsai-27B-gguf", bonsai)!!
 
+        // drafts (dspark) are not primary quants...
         assertTrue(r.quants.none { isCompanionFile(it.file) })
-        val vision = r.companions.filter { it.kind == CompanionKind.VISION }.map { it.file }
-        val draft = r.companions.filter { it.kind == CompanionKind.DRAFT }.map { it.file }
-        assertEquals(listOf("Bonsai-27B-mmproj-Q8_0.gguf", "Bonsai-27B-mmproj-BF16.gguf"), vision)
-        assertEquals(listOf("Bonsai-27B-dspark-Q4_1.gguf", "Bonsai-27B-dspark-bf16.gguf"), draft)
+        // ...and are NOT surfaced as companions either — vision (mmproj) only, smallest first.
+        // (dspark drafts are unsupported by the on-device build and would crash the server.)
+        assertEquals(
+            listOf("Bonsai-27B-mmproj-Q8_0.gguf", "Bonsai-27B-mmproj-BF16.gguf"),
+            r.companions.map { it.file },
+        )
+        assertTrue(r.companions.none { isDraftFile(it.file) })
     }
 
     @Test fun parseRepo_singleGgufHasOneQuantNoCompanions() {
