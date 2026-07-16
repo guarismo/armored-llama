@@ -1,7 +1,20 @@
 # Quant Picker for Model Download — Design
 
 **Date:** 2026-07-15
-**Status:** Approved (brainstorming)
+**Status:** Implemented (with amendment below)
+
+## Amendment (2026-07-15, post-implementation): vision-only companions
+
+On-device testing after implementation found that **auto-wiring a draft companion crashes the server**.
+The bundled llama.cpp (`b9775`) has no `dspark` architecture (prism-ml's custom DSpark drafter), so
+launching with `--model-draft …dspark….gguf` exits with `unknown model architecture: 'dspark'` — the
+identical primary model loads and serves fine without the draft. Speculative decoding also gives little
+benefit on a CPU phone. Decision (user-approved): the picker surfaces and wires **vision (mmproj)
+companions only**. Draft files remain excluded from the primary-quant list (`isDraftFile`) but are never
+offered as companions nor derived by `switchedConfig`. The curated default's MTP draft is unaffected (it
+is hardcoded in `switchedConfig`'s curated branch, not derived from `[library]`). This supersedes the
+"vision **and** draft" language in Goals/§4/§5 below: read every "draft companion" mention as removed, and
+`companionFilesForRepo`/`CompanionKind` as replaced by `mmprojForRepo`/(no kind).
 
 ## Problem
 

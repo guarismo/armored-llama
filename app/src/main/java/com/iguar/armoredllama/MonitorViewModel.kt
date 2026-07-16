@@ -8,6 +8,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import android.os.Build
 import android.provider.Settings
+import com.iguar.armoredllama.server.mmprojForRepo
 import com.iguar.armoredllama.server.ConfigRepository
 import com.iguar.armoredllama.server.GithubReleases
 import com.iguar.armoredllama.server.HfModels
@@ -25,9 +26,11 @@ import com.iguar.armoredllama.server.isServerIdle
 import com.iguar.armoredllama.server.isNewer
 import com.iguar.armoredllama.server.parseThroughput
 import com.iguar.armoredllama.server.primaryModels
+import com.iguar.armoredllama.server.quantFrom
 import com.iguar.armoredllama.server.switchedConfig
 import kotlinx.coroutines.flow.collect
 import com.iguar.armoredllama.device.DeviceTelemetry
+import com.iguar.armoredllama.model.CompanionOption
 import com.iguar.armoredllama.model.CORE_COUNT
 import com.iguar.armoredllama.model.HISTORY_SIZE
 import com.iguar.armoredllama.model.Histories
@@ -35,6 +38,8 @@ import com.iguar.armoredllama.model.ModelEntry
 import com.iguar.armoredllama.model.ModelState
 import com.iguar.armoredllama.model.MonitorUiState
 import com.iguar.armoredllama.model.Panel
+import com.iguar.armoredllama.model.pickHeadline
+import com.iguar.armoredllama.model.QuantOption
 import com.iguar.armoredllama.model.ServerSettings
 import com.iguar.armoredllama.model.UpdateStatus
 import com.iguar.armoredllama.model.UpdateUi
@@ -370,24 +375,38 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val freeRamMB = state.metrics.ramFree
                 val settings = state.settings
-                val results = HfModels.search(q).map { candidate ->
-                    val installed = downloader.localSize(candidate.file) > 0L
+                val results = HfModels.searchRepos(q).map { repo ->
+                    val quantOptions = repo.quants.map { qf ->
+                        QuantOption(
+                            file = qf.file,
+                            quant = qf.quant,
+                            sizeGB = qf.sizeGB,
+                            fit = estimateModelFit(
+                                modelSizeGB = qf.sizeGB,
+                                freeRamMB = freeRamMB,
+                                ctx = settings.ctx,
+                                cacheTypeK = settings.cacheTypeK,
+                                cacheTypeV = settings.cacheTypeV,
+                                flashAttn = settings.flashAttn,
+                            ),
+                        )
+                    }
+                    val companionOptions = repo.companions.map {
+                        CompanionOption(it.file, it.quant, it.sizeGB)
+                    }
+                    val headline = pickHeadline(quantOptions) ?: quantOptions.first()
+                    val installed = downloader.localSize(headline.file) > 0L
                     ModelEntry(
-                        id = candidate.repo,
-                        repo = candidate.repo,
-                        name = candidate.name,
-                        file = candidate.file,
-                        quant = candidate.quant,
-                        sizeGB = candidate.sizeGB,
-                        fit = estimateModelFit(
-                            modelSizeGB = candidate.sizeGB,
-                            freeRamMB = freeRamMB,
-                            ctx = settings.ctx,
-                            cacheTypeK = settings.cacheTypeK,
-                            cacheTypeV = settings.cacheTypeV,
-                            flashAttn = settings.flashAttn,
-                        ),
+                        id = repo.repo,
+                        repo = repo.repo,
+                        name = repo.name,
+                        file = headline.file,
+                        quant = headline.quant,
+                        sizeGB = headline.sizeGB,
+                        fit = headline.fit,
                         state = if (installed) ModelState.INSTALLED else ModelState.IDLE,
+                        quants = quantOptions,
+                        companions = companionOptions,
                     )
                 }.sortedWith(compareBy<ModelEntry> { fitRank(it.fit.level) }.thenBy { it.sizeGB })
                 state = state.copy(
@@ -405,55 +424,111 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun downloadModel(id: String) {
-        val target = state.models.firstOrNull { it.id == id } ?: return
-        if (target.state == ModelState.DOWNLOADING) return
-        if (target.fit.level == ModelFitLevel.TIGHT || target.fit.level == ModelFitLevel.TOO_LARGE) {
-            LogBus.append("RAM warning before download: ${target.fit.label.lowercase()} for ${target.file}; ${target.fit.detail}")
-        }
+    fun downloadModel(repo: String, file: String) {
+        val entry = state.models.firstOrNull { it.id == repo }
+        if (entry?.downloadingFile != null) return
+        val d = LlamaConfig()
         val prev = configRepo.load()
+        // Curated default brings its bundled draft+mmproj; any other repo derives only its vision
+        // projector (drafts stay unwired — the on-device build cannot run arbitrary drafters).
+        val (draft, mmproj) = if (repo == d.repo && file == d.modelFile) {
+            d.draftFile to d.mmprojFile
+        } else {
+            "" to mmprojForRepo(prev.library, repo, file)
+        }
         val config = prev.copy(
-            repo = target.repo,
-            modelFile = target.file,
-            draftFile = target.draftFile,
-            mmprojFile = target.mmprojFile,
-            useDraft = target.draftFile.isNotBlank(),
-            useMmproj = target.mmprojFile.isNotBlank(),
-            // Remember where this file came from so the local list can show/switch it later.
-            library = prev.library + (target.file to target.repo),
+            repo = repo,
+            modelFile = file,
+            draftFile = draft,
+            mmprojFile = mmproj,
+            useDraft = draft.isNotBlank(),
+            useMmproj = mmproj.isNotBlank(),
+            library = prev.library + (file to repo),
         )
         configRepo.save(config)
         state = state.copy(
-            modelFile = target.file.substringBeforeLast(".").takeUnless { it.isBlank() } ?: target.file,
+            modelFile = file.substringBeforeLast(".").takeUnless { it.isBlank() } ?: file,
             settings = state.settings.copy(useDraft = config.useDraft, useMmproj = config.useMmproj),
         )
-        val files = listOf(config.modelFile, config.draftFile, config.mmprojFile).filter { it.isNotBlank() }
+        // Only fetch files not already on disk (curated companions download; derived ones are present).
+        val files = listOf(config.modelFile, config.draftFile, config.mmprojFile)
+            .filter { it.isNotBlank() && downloader.localSize(it) <= 0L }
+        val fit = entry?.quants?.firstOrNull { it.file == file }?.fit ?: entry?.fit
+        if (fit != null && (fit.level == ModelFitLevel.TIGHT || fit.level == ModelFitLevel.TOO_LARGE)) {
+            LogBus.append("RAM warning before download: ${fit.label.lowercase()} for $file; ${fit.detail}")
+        }
         viewModelScope.launch {
             if (files.isEmpty()) {
-                LogBus.append("download skipped: no model files configured")
-                updateModel(id) { it.copy(state = ModelState.IDLE) }
+                updateModel(repo) { it.installedWith(file) }
                 return@launch
             }
-            updateModel(id) { it.copy(state = ModelState.DOWNLOADING, progress = 0f) }
+            updateModel(repo) { it.copy(state = ModelState.DOWNLOADING, downloadingFile = file, progress = 0f) }
             try {
-                files.forEachIndexed { idx, file ->
-                    downloader.download(config.repo, file) { written, total ->
+                files.forEachIndexed { idx, f ->
+                    downloader.download(config.repo, f) { written, total ->
                         val frac = if (total > 0) written.toFloat() / total else 0f
                         val overall = (idx + frac) / files.size
-                        updateModel(id) { it.copy(progress = overall.coerceIn(0f, 1f)) }
+                        updateModel(repo) { it.copy(progress = overall.coerceIn(0f, 1f)) }
                     }
                 }
-                updateModel(id) { it.copy(state = ModelState.INSTALLED, progress = 1f) }
+                updateModel(repo) { it.installedWith(file) }
                 LogBus.append("download complete: ${config.repo}")
             } catch (e: Exception) {
-                updateModel(id) { it.copy(state = ModelState.IDLE) }
+                updateModel(repo) { it.copy(state = ModelState.IDLE, downloadingFile = null) }
                 LogBus.append("download failed: ${e.message}")
+            }
+        }
+    }
+
+    // (`entry` above is `state.models.firstOrNull { it.id == repo }`, reused for the fit warning.)
+
+    /** Download a vision projector (mmproj) and record it in [library]; wire it if its repo is active. */
+    fun downloadCompanion(repo: String, file: String) {
+        val entry = state.models.firstOrNull { it.id == repo }
+        if (entry?.downloadingFile != null) return
+        viewModelScope.launch {
+            updateModel(repo) { it.copy(downloadingFile = file, progress = 0f) }
+            try {
+                downloader.download(repo, file) { written, total ->
+                    val frac = if (total > 0) written.toFloat() / total else 0f
+                    updateModel(repo) { it.copy(progress = frac.coerceIn(0f, 1f)) }
+                }
+                val cfg = configRepo.load()
+                var next = cfg.copy(library = cfg.library + (file to repo))
+                // If this projector belongs to the currently active model's repo, wire it for next launch.
+                if (repo == cfg.repo) {
+                    next = next.copy(mmprojFile = file, useMmproj = true)
+                    LogBus.append("restart to apply vision")
+                }
+                configRepo.save(next)
+                updateModel(repo) { it.copy(downloadingFile = null, progress = 1f) }
+                if (repo == cfg.repo) {
+                    state = state.copy(settings = state.settings.copy(useMmproj = next.useMmproj))
+                }
+                LogBus.append("companion downloaded: $file")
+            } catch (e: Exception) {
+                updateModel(repo) { it.copy(downloadingFile = null) }
+                LogBus.append("companion download failed: ${e.message}")
             }
         }
     }
 
     private fun updateModel(id: String, transform: (ModelEntry) -> ModelEntry) {
         state = state.copy(models = state.models.map { if (it.id == id) transform(it) else it })
+    }
+
+    /** Mark a repo card INSTALLED and promote the just-downloaded [file] to its headline quant. */
+    private fun ModelEntry.installedWith(file: String): ModelEntry {
+        val q = quants.firstOrNull { it.file == file }
+        return copy(
+            state = ModelState.INSTALLED,
+            downloadingFile = null,
+            progress = 1f,
+            file = file,
+            quant = q?.quant ?: quant,
+            sizeGB = q?.sizeGB ?: sizeGB,
+            fit = q?.fit ?: fit,
+        )
     }
 
     // Local model switching (blank-search list) ------------------------------------------------
@@ -622,13 +697,6 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
 
 /** Round a float to a whole number for display. */
 fun Float.toIntDisplay(): Int = this.roundToInt()
-
-private fun quantFrom(file: String): String {
-    val upper = file.uppercase()
-    return listOf("Q4_K_M", "Q4_K_S", "Q5_K_M", "Q3_K_M", "Q2_K_XL", "Q2_K", "Q8_0", "F16", "FP16")
-        .firstOrNull { it in upper }
-        ?: "GGUF"
-}
 
 private fun fitRank(level: ModelFitLevel): Int = when (level) {
     ModelFitLevel.FITS -> 0

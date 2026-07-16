@@ -59,4 +59,56 @@ class ModelLibraryTest {
         assertEquals("unsloth/Qwen3.5-4B-GGUF", next.repo)
         assertEquals(cfg.library, next.library) // library passes through
     }
+
+    @Test fun mmprojForRepo_findsVisionExcludingSelf() {
+        val library = mapOf(
+            "Bonsai-27B-Q1_0.gguf" to "prism-ml/Bonsai-27B-gguf",
+            "Bonsai-27B-mmproj-Q8_0.gguf" to "prism-ml/Bonsai-27B-gguf",
+            "Bonsai-27B-dspark-Q4_1.gguf" to "prism-ml/Bonsai-27B-gguf",
+            "Other-Q4_K_M.gguf" to "acme/other-GGUF",
+        )
+
+        assertEquals(
+            "Bonsai-27B-mmproj-Q8_0.gguf",
+            mmprojForRepo(library, "prism-ml/Bonsai-27B-gguf", "Bonsai-27B-Q1_0.gguf"),
+        )
+    }
+
+    @Test fun mmprojForRepo_blankWhenRepoBlankOrNoVision() {
+        assertEquals("", mmprojForRepo(emptyMap(), "", "x.gguf"))
+        val lib = mapOf("Other-Q4_K_M.gguf" to "acme/other-GGUF")
+        assertEquals("", mmprojForRepo(lib, "acme/other-GGUF", "Other-Q4_K_M.gguf"))
+    }
+
+    @Test fun switchedConfig_wiresMmprojButNeverDraftForArbitrary() {
+        // Even with a draft recorded in [library], switching to an arbitrary model wires ONLY the
+        // vision projector — drafts are unsupported on-device and would crash the server.
+        val cfg = LlamaConfig(
+            library = mapOf(
+                "Bonsai-27B-Q1_0.gguf" to "prism-ml/Bonsai-27B-gguf",
+                "Bonsai-27B-mmproj-Q8_0.gguf" to "prism-ml/Bonsai-27B-gguf",
+                "Bonsai-27B-dspark-Q4_1.gguf" to "prism-ml/Bonsai-27B-gguf",
+            ),
+        )
+
+        val next = switchedConfig(cfg, "Bonsai-27B-Q1_0.gguf")
+
+        assertEquals("prism-ml/Bonsai-27B-gguf", next.repo)
+        assertEquals("Bonsai-27B-Q1_0.gguf", next.modelFile)
+        assertEquals("", next.draftFile)
+        assertEquals("Bonsai-27B-mmproj-Q8_0.gguf", next.mmprojFile)
+        assertEquals(false, next.useDraft)
+        assertEquals(true, next.useMmproj)
+    }
+
+    @Test fun quantFrom_recognizesLowBitAndKQuants() {
+        assertEquals("Q1_0", quantFrom("Bonsai-27B-Q1_0.gguf"))
+        assertEquals("IQ2_XXS", quantFrom("model-IQ2_XXS.gguf"))
+        assertEquals("IQ1_S", quantFrom("model-IQ1_S.gguf"))
+        assertEquals("Q2_K_S", quantFrom("model-Q2_K_S.gguf"))
+        assertEquals("Q2_K_XL", quantFrom("gemma-4-E2B-it-qat-UD-Q2_K_XL.gguf"))
+        assertEquals("Q4_K_M", quantFrom("model-Q4_K_M.gguf"))
+        assertEquals("BF16", quantFrom("model-mmproj-BF16.gguf"))
+        assertEquals("GGUF", quantFrom("model-unknownquant.gguf"))
+    }
 }

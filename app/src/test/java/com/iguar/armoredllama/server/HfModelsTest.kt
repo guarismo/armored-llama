@@ -2,62 +2,63 @@ package com.iguar.armoredllama.server
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class HfModelsTest {
 
-    /** The real bug: HF /tree/main carries per-file `size`; siblings did not. Size must populate. */
-    @Test
-    fun parseCandidate_readsSizeFromTree() {
-        val tree = """
-            [
-              {"type":"file","path":"gemma-4-E2B-it-qat-UD-Q2_K_XL.gguf","size":2186184768},
-              {"type":"file","path":"mtp-gemma-4-E2B-it.gguf","size":59234176},
-              {"type":"file","path":"mmproj-F16.gguf","size":985654080}
-            ]
-        """.trimIndent()
+    private val bonsai = """
+        [
+          {"type":"file","path":"Bonsai-27B-F16.gguf","size":53808280640},
+          {"type":"file","path":"Bonsai-27B-Q1_0.gguf","size":3803452480},
+          {"type":"file","path":"Bonsai-27B-dspark-Q4_1.gguf","size":1787468768},
+          {"type":"file","path":"Bonsai-27B-dspark-bf16.gguf","size":7291885792},
+          {"type":"file","path":"Bonsai-27B-mmproj-BF16.gguf","size":931145760},
+          {"type":"file","path":"Bonsai-27B-mmproj-Q8_0.gguf","size":629246880},
+          {"type":"file","path":"README.md","size":21877}
+        ]
+    """.trimIndent()
 
-        val c = HfModels.parseCandidate("unsloth/gemma-4-E2B-it-qat-mobile-GGUF", tree)!!
+    @Test fun parseRepo_returnsAllPrimaryQuantsSmallestFirst() {
+        val r = HfModels.parseRepo("prism-ml/Bonsai-27B-gguf", bonsai)!!
 
-        assertEquals("gemma-4-E2B-it-qat-UD-Q2_K_XL.gguf", c.file)
-        assertEquals("Q2_K", c.quant)
-        assertEquals(2186184768f / (1024f * 1024f * 1024f), c.sizeGB, 0.01f)
+        assertEquals(listOf("Bonsai-27B-Q1_0.gguf", "Bonsai-27B-F16.gguf"), r.quants.map { it.file })
+        assertEquals("Q1_0", r.quants[0].quant)
+        assertEquals(3803452480f / (1024f * 1024f * 1024f), r.quants[0].sizeGB, 0.01f)
     }
 
-    /** Best-ranked quant wins; mmproj/draft/mtp companions are excluded from selection. */
-    @Test
-    fun parseCandidate_picksBestQuantSkippingCompanions() {
+    @Test fun parseRepo_companionsAreVisionOnly_draftsExcludedEverywhere() {
+        val r = HfModels.parseRepo("prism-ml/Bonsai-27B-gguf", bonsai)!!
+
+        // drafts (dspark) are not primary quants...
+        assertTrue(r.quants.none { isCompanionFile(it.file) })
+        // ...and are NOT surfaced as companions either — vision (mmproj) only, smallest first.
+        // (dspark drafts are unsupported by the on-device build and would crash the server.)
+        assertEquals(
+            listOf("Bonsai-27B-mmproj-Q8_0.gguf", "Bonsai-27B-mmproj-BF16.gguf"),
+            r.companions.map { it.file },
+        )
+        assertTrue(r.companions.none { isDraftFile(it.file) })
+    }
+
+    @Test fun parseRepo_singleGgufHasOneQuantNoCompanions() {
+        val tree = """[{"type":"file","path":"model-Q4_K_M.gguf","size":2000000000}]"""
+
+        val r = HfModels.parseRepo("acme/model-GGUF", tree)!!
+
+        assertEquals(1, r.quants.size)
+        assertEquals("model-Q4_K_M.gguf", r.quants[0].file)
+        assertTrue(r.companions.isEmpty())
+    }
+
+    @Test fun parseRepo_nullWhenNoPrimaryQuant() {
         val tree = """
             [
-              {"type":"file","path":"model-Q2_K.gguf","size":1000000000},
-              {"type":"file","path":"model-Q4_K_M.gguf","size":2000000000},
               {"type":"file","path":"mmproj-F16.gguf","size":500000000},
-              {"type":"file","path":"README.md","size":1234}
+              {"type":"file","path":"README.md","size":10}
             ]
         """.trimIndent()
 
-        val c = HfModels.parseCandidate("acme/model-GGUF", tree)!!
-
-        assertEquals("model-Q4_K_M.gguf", c.file)
-        assertEquals("Q4_K_M", c.quant)
-        assertEquals(2000000000f / (1024f * 1024f * 1024f), c.sizeGB, 0.01f)
-    }
-
-    /** A file with no size field stays selectable but reports 0 (→ UNKNOWN fit), not a crash. */
-    @Test
-    fun parseCandidate_missingSizeYieldsZero() {
-        val tree = """[{"type":"file","path":"model-Q4_K_M.gguf"}]"""
-
-        val c = HfModels.parseCandidate("acme/model-GGUF", tree)!!
-
-        assertEquals("model-Q4_K_M.gguf", c.file)
-        assertEquals(0f, c.sizeGB, 0.0001f)
-    }
-
-    @Test
-    fun parseCandidate_returnsNullWhenNoGguf() {
-        val tree = """[{"type":"file","path":"README.md","size":10}]"""
-
-        assertNull(HfModels.parseCandidate("acme/x", tree))
+        assertNull(HfModels.parseRepo("acme/x", tree))
     }
 }
