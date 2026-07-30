@@ -25,6 +25,18 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        // Committed debug keystore (password: android) so every CI-built release APK shares one
+        // signing key and installs as an update over the previous one. It is a throwaway debug key —
+        // safe to publish; it is NOT a production release key.
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false

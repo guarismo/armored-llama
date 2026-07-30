@@ -1,0 +1,17 @@
+# Normalize line endings across platforms
+* text=auto eol=lf
+
+# Windows scripts keep CRLF
+*.bat text eol=crlf
+
+# Unix scripts / gradle wrapper keep LF
+gradlew text eol=lf
+
+# Binary assets — never touch
+*.png binary
+*.jpg binary
+*.webp binary
+*.keystore binary
+*.jar binary
+*.gguf binary
+*.so binary
