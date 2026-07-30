@@ -163,8 +163,8 @@ Or just open the project in **Android Studio** and hit Run.
 Releases are automated. Push a tag and CI builds the APK and attaches it to a GitHub Release:
 
 ```bash
-git tag v1.0
-git push origin v1.0
+git tag v0.1.0
+git push origin v0.1.0
 ```
 
 The [`Release APK`](.github/workflows/release.yml) workflow builds `assembleDebug`, renames the APK to `armored-llama-<tag>.apk`, and publishes a release with generated notes. The APK is signed with the **committed debug keystore** (`app/debug.keystore`, password `android`) — a throwaway debug key, safe to publish, that keeps a stable signature so each release installs as an update over the last. For a Play-Store-grade signed build, add a real `release` signing config with secrets and switch the workflow to `assembleRelease`.
