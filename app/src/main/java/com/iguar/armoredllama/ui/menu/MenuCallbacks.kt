@@ -13,4 +13,6 @@ data class MenuCallbacks(
     val onDownloadCompanion: (String, String) -> Unit,
     val onSwitchModel: (String) -> Unit,
     val onDeleteModel: (String) -> Unit,
+    val onSetDrafter: (String, String) -> Unit,
+    val onDeleteDrafter: (String) -> Unit,
 )

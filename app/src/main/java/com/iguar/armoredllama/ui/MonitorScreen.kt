@@ -56,6 +56,8 @@ fun MonitorScreen(vm: MonitorViewModel) {
                 onDownloadCompanion = vm::downloadCompanion,
                 onSwitchModel = vm::switchModel,
                 onDeleteModel = vm::deleteModel,
+                onSetDrafter = vm::setDrafter,
+                onDeleteDrafter = vm::deleteDrafter,
             ),
         )
     }

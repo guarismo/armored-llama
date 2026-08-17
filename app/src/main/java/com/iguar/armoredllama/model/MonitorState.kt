@@ -84,6 +84,9 @@ data class QuantOption(val file: String, val quant: String, val sizeGB: Float, v
 /** One downloadable vision projector (mmproj) of a repo. Size only — fit is about the primary. */
 data class CompanionOption(val file: String, val quant: String, val sizeGB: Float)
 
+/** A draft/speculative GGUF present on disk, for the drafter chooser + management list. */
+data class DrafterFile(val file: String, val sizeGB: Float)
+
 /**
  * The recommended quant to headline: the largest whose fit is FITS/TIGHT, else the smallest.
  * Null when [quants] is empty.
@@ -117,6 +120,8 @@ data class MonitorUiState(
     val running: Boolean = false,
     val serverStatus: LlamaServerService.Status =
         LlamaServerService.Status.STOPPED,
+    val serverEpoch: Int = 0,                    // bumped on each transition into RUNNING (chat reload)
+    val localDrafters: List<DrafterFile> = emptyList(),
     val host: String = "shockwave",
     val modelFile: String = "Llama-3.1-8B-Q4_K_M",
     val metrics: Metrics = Metrics(),
