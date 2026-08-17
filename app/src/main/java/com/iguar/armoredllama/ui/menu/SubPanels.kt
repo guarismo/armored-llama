@@ -22,6 +22,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
@@ -40,6 +41,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.iguar.armoredllama.model.DrafterFile
 import com.iguar.armoredllama.model.ModelEntry
 import com.iguar.armoredllama.model.ModelState
 import com.iguar.armoredllama.model.MonitorUiState
@@ -357,12 +359,17 @@ fun HfPanel(state: MonitorUiState, onBack: () -> Unit, callbacks: MenuCallbacks)
                         ModelCard(
                             model = model,
                             local = local,
+                            drafters = state.localDrafters,
                             onDownloadModel = callbacks.onDownloadModel,
                             onDownloadCompanion = callbacks.onDownloadCompanion,
                             onSwitch = if (local) ({ callbacks.onSwitchModel(model.file) }) else null,
                             onDelete = if (local) ({ callbacks.onDeleteModel(model.file) }) else null,
+                            onSetDrafter = if (local || model.state == ModelState.ACTIVE) callbacks.onSetDrafter else null,
                         )
                     }
+                }
+                if (state.hfQuery.isBlank() && state.localDrafters.isNotEmpty()) {
+                    DraftersOnDisk(drafters = state.localDrafters, onDelete = callbacks.onDeleteDrafter)
                 }
             }
         }
@@ -407,6 +414,8 @@ private fun ModelCard(
     onDownloadCompanion: (String, String) -> Unit,
     onSwitch: (() -> Unit)? = null,
     onDelete: (() -> Unit)? = null,
+    drafters: List<DrafterFile> = emptyList(),
+    onSetDrafter: ((String, String) -> Unit)? = null,
 ) {
     val c = MonitorTheme.colors
     var confirmDelete by remember { mutableStateOf(false) }
@@ -511,6 +520,38 @@ private fun ModelCard(
             }
         }
 
+        if (onSetDrafter != null) {
+            var pickDrafter by remember { mutableStateOf(false) }
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable { pickDrafter = true }
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Drafter: ", style = MonitorType.monoCaption, color = c.muted)
+                Text(
+                    model.draftFile.ifBlank { "none" }.substringBeforeLast("."),
+                    style = MonitorType.monoCaption,
+                    color = c.accent,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Choose drafter", tint = c.accent, modifier = Modifier.size(16.dp))
+            }
+            if (pickDrafter) {
+                DrafterChooser(
+                    current = model.draftFile,
+                    drafters = drafters,
+                    onPick = { chosen -> pickDrafter = false; onSetDrafter(model.file, chosen) },
+                    onDismiss = { pickDrafter = false },
+                )
+            }
+        }
+
         if (canExpand) {
             Spacer(Modifier.height(10.dp))
             Text(
@@ -562,6 +603,100 @@ private fun ModelCard(
                 TextButton(onClick = { confirmDelete = false }) { Text("Cancel") }
             },
         )
+    }
+}
+
+@Composable
+private fun DrafterChooser(
+    current: String,
+    drafters: List<DrafterFile>,
+    onPick: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val c = MonitorTheme.colors
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Choose drafter") },
+        text = {
+            Column {
+                DrafterChoiceRow(label = "none", selected = current.isBlank(), size = null) { onPick("") }
+                drafters.forEach { d ->
+                    DrafterChoiceRow(
+                        label = d.file.substringBeforeLast("."),
+                        selected = current == d.file,
+                        size = d.sizeGB,
+                    ) { onPick(d.file) }
+                }
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "A mismatched drafter won't load — the server will fail to start.",
+                    style = MonitorType.monoCaption,
+                    color = c.warn,
+                )
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun DrafterChoiceRow(label: String, selected: Boolean, size: Float?, onClick: () -> Unit) {
+    val c = MonitorTheme.colors
+    Row(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // A checkmark on the selected row; transparent (but space-reserving) on the others.
+        Icon(
+            Icons.Filled.Check,
+            contentDescription = null,
+            tint = if (selected) c.good else androidx.compose.ui.graphics.Color.Transparent,
+            modifier = Modifier.size(16.dp),
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(label, style = MonitorType.bodyLabel, color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        if (size != null) {
+            Spacer(Modifier.width(8.dp))
+            Text("%.1f GB".format(size), style = MonitorType.monoCaption, color = c.muted)
+        }
+    }
+}
+
+@Composable
+private fun DraftersOnDisk(drafters: List<DrafterFile>, onDelete: (String) -> Unit) {
+    val c = MonitorTheme.colors
+    Spacer(Modifier.height(16.dp))
+    Text("─ Drafters on disk ─", style = MonitorType.monoCaption, color = c.muted)
+    Spacer(Modifier.height(8.dp))
+    drafters.forEach { d ->
+        key(d.file) {
+            var confirm by remember { mutableStateOf(false) }
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("⚡ ${d.file.substringBeforeLast(".")}", style = MonitorType.monoCaption, color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                Spacer(Modifier.width(8.dp))
+                Text("%.1f GB".format(d.sizeGB), style = MonitorType.monoCaption, color = c.muted)
+                Spacer(Modifier.width(12.dp))
+                Icon(
+                    Icons.Filled.Delete,
+                    contentDescription = "Delete ${d.file}",
+                    tint = c.bad,
+                    modifier = Modifier.size(18.dp).clickable { confirm = true },
+                )
+            }
+            if (confirm) {
+                AlertDialog(
+                    onDismissRequest = { confirm = false },
+                    title = { Text("Delete drafter?") },
+                    text = { Text("${d.file} — frees %.1f GB".format(d.sizeGB)) },
+                    confirmButton = { TextButton(onClick = { confirm = false; onDelete(d.file) }) { Text("Delete") } },
+                    dismissButton = { TextButton(onClick = { confirm = false }) { Text("Cancel") } },
+                )
+            }
+        }
     }
 }
 

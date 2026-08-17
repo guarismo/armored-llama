@@ -16,10 +16,11 @@ import android.webkit.WebViewClient
 object ChatWebViewHolder {
     private var webView: WebView? = null
     private var loadedUrl: String? = null
+    private var loadedEpoch = 0
 
     /** Create-or-reuse the WebView, (re)loading [url] if it changed since the last load. */
     @SuppressLint("SetJavaScriptEnabled", "ClickableViewAccessibility")
-    fun obtain(context: Context, url: String): WebView {
+    fun obtain(context: Context, url: String, epoch: Int): WebView {
         val view = webView ?: WebView(context).apply {
             // Explicit MATCH_PARENT height: a WRAP_CONTENT WebView puts Chromium in a content-growing
             // mode where CSS `100vh`/`100dvh` resolve to 0, collapsing the web UI's viewport-height
@@ -42,6 +43,7 @@ object ChatWebViewHolder {
         }
         if (loadedUrl != url) {
             loadedUrl = url
+            loadedEpoch = epoch      // seed: a fresh page is already current for this epoch
             // Load only once the WebView has a real size. Loading before Compose lays it out means the
             // SvelteKit app does its first layout at height 0, latching wrong scroll-height/measurement
             // values — the message list then has almost no scroll range and its last content hides
@@ -51,6 +53,19 @@ object ChatWebViewHolder {
         // AndroidView's factory must return a parentless view; detach from any previous host.
         (view.parent as? ViewGroup)?.removeView(view)
         return view
+    }
+
+    /** Reload if the server has (re)started since the page loaded — keeps the UI on the fresh backend. */
+    fun onEpoch(epoch: Int) {
+        if (epoch != loadedEpoch) {
+            loadedEpoch = epoch
+            webView?.reload()
+        }
+    }
+
+    /** Manual reload (Chat header button). */
+    fun reload() {
+        webView?.reload()
     }
 
     private fun loadWhenSized(view: WebView, url: String) {
@@ -78,5 +93,6 @@ object ChatWebViewHolder {
         }
         webView = null
         loadedUrl = null
+        loadedEpoch = 0
     }
 }

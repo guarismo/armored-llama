@@ -28,4 +28,6 @@ data class LlamaConfig(
     val useMmproj: Boolean = true,   // vision/multimodal: emit --mmproj (~1 GB; off for text-only)
     // Downloaded-file → repo bookkeeping (INI [library] section); display + switch-back metadata.
     val library: Map<String, String> = emptyMap(),
+    // Per-model drafter choice (INI [drafters] section): modelFile -> draftFile ("" = explicit none).
+    val drafters: Map<String, String> = emptyMap(),
 )

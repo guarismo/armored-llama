@@ -123,4 +123,73 @@ class ModelLibraryTest {
         // Bases still resolve when no longer-variant is present.
         assertEquals("Q6_K", quantFrom("model-Q6_K.gguf"))
     }
+
+    @Test fun draftForModel_explicitChoiceWins_emptyMeansNone() {
+        val cfg = LlamaConfig(drafters = mapOf(
+            "HiFi.gguf" to "mtp-gemma-4-E2B-it.gguf",
+            LlamaConfig().modelFile to "",   // explicitly disable the curated model's draft
+        ))
+        assertEquals("mtp-gemma-4-E2B-it.gguf", draftForModel(cfg, "HiFi.gguf"))
+        assertEquals("", draftForModel(cfg, LlamaConfig().modelFile))   // explicit none overrides curated
+    }
+
+    @Test fun draftForModel_curatedFallback_andArbitraryNone() {
+        val cfg = LlamaConfig()  // no [drafters] entries
+        assertEquals(LlamaConfig().draftFile, draftForModel(cfg, LlamaConfig().modelFile)) // curated default
+        assertEquals("", draftForModel(cfg, "Qwen3.5-4B-Q4_K_M.gguf"))                     // arbitrary → none
+    }
+
+    @Test fun switchedConfig_wiresChosenDrafterForArbitraryModel() {
+        val cfg = LlamaConfig(
+            library = mapOf("HiFi.gguf" to "fraQtl/Gemma-4-E2B-it-Hi-Fi-GGUF"),
+            drafters = mapOf("HiFi.gguf" to "mtp-gemma-4-E2B-it.gguf"),
+        )
+        val next = switchedConfig(cfg, "HiFi.gguf")
+        assertEquals("HiFi.gguf", next.modelFile)
+        assertEquals("mtp-gemma-4-E2B-it.gguf", next.draftFile)
+        assertEquals(true, next.useDraft)
+    }
+
+    @Test fun switchedConfig_curatedDrafterCanBeDisabled() {
+        val cfg = LlamaConfig(drafters = mapOf(LlamaConfig().modelFile to ""))
+        val next = switchedConfig(cfg, LlamaConfig().modelFile)
+        assertEquals("", next.draftFile)
+        assertEquals(false, next.useDraft)
+    }
+
+    @Test fun draftersOnDisk_keepsOnlyDraftGgufs() {
+        val files = listOf(
+            "mtp-gemma-4-E2B-it.gguf" to 59_234_176L,     // draft (mtp)
+            "Bonsai-27B-dspark-Q4_1.gguf" to 1_787_468_768L, // draft (dspark)
+            "gemma-4-E2B-it-qat-UD-Q2_K_XL.gguf" to 2_186_184_768L, // primary
+            "mmproj-F16.gguf" to 985_654_080L,            // vision
+            "notes.txt" to 10L,                           // not gguf
+        )
+        assertEquals(listOf(files[0], files[1]), draftersOnDisk(files))
+    }
+
+    @Test fun configAfterDrafterDelete_prunesMapsAndClearsActiveDraft() {
+        val cfg = LlamaConfig(
+            draftFile = "mtp-gemma-4-E2B-it.gguf", useDraft = true,
+            library = mapOf("mtp-gemma-4-E2B-it.gguf" to "somerepo", "HiFi.gguf" to "repo2"),
+            drafters = mapOf("HiFi.gguf" to "mtp-gemma-4-E2B-it.gguf", "Qwen.gguf" to ""),
+        )
+        val next = configAfterDrafterDelete(cfg, "mtp-gemma-4-E2B-it.gguf")
+        assertEquals("", next.draftFile)                                   // active draft cleared
+        assertEquals(false, next.useDraft)
+        // HiFi→mtp mapping pruned; curated model gets an explicit "none" since the deleted file was its
+        // own draft (mtp-gemma-4-E2B-it.gguf is LlamaConfig()'s default draftFile).
+        assertEquals(mapOf("Qwen.gguf" to "", LlamaConfig().modelFile to ""), next.drafters)
+        assertEquals(mapOf("HiFi.gguf" to "repo2"), next.library)          // library entry pruned
+    }
+
+    @Test fun configAfterDrafterDelete_suppressesCuratedFallbackWhenCuratedDraftDeleted() {
+        val d = LlamaConfig()  // curated defaults: draftFile = the curated MTP draft, no [drafters] entries
+        val next = configAfterDrafterDelete(d, d.draftFile)
+        // curated model is now explicitly "none" — the fallback can't re-derive the deleted file
+        assertEquals("", next.drafters[d.modelFile])
+        assertEquals("", draftForModel(next, d.modelFile))
+        assertEquals("", next.draftFile)
+        assertEquals(false, next.useDraft)
+    }
 }

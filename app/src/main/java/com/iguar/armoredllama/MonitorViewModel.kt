@@ -21,6 +21,8 @@ import com.iguar.armoredllama.server.ModelFitLevel
 import com.iguar.armoredllama.server.RuntimeBinaries
 import com.iguar.armoredllama.server.UpdateDownloader
 import com.iguar.armoredllama.server.companionsOf
+import com.iguar.armoredllama.server.configAfterDrafterDelete
+import com.iguar.armoredllama.server.draftersOnDisk
 import com.iguar.armoredllama.server.estimateModelFit
 import com.iguar.armoredllama.server.isServerIdle
 import com.iguar.armoredllama.server.isNewer
@@ -32,6 +34,7 @@ import kotlinx.coroutines.flow.collect
 import com.iguar.armoredllama.device.DeviceTelemetry
 import com.iguar.armoredllama.model.CompanionOption
 import com.iguar.armoredllama.model.CORE_COUNT
+import com.iguar.armoredllama.model.DrafterFile
 import com.iguar.armoredllama.model.HISTORY_SIZE
 import com.iguar.armoredllama.model.Histories
 import com.iguar.armoredllama.model.ModelEntry
@@ -74,6 +77,7 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
     private var tickJob: Job? = null
     private var hfSearchJob: Job? = null
     private var pendingRestart = false
+    private var lastStatus = LlamaServerService.Status.STOPPED
     private var tickCount = 0
 
     /** Real device telemetry. Reads fall back to mock values when unreadable. */
@@ -128,6 +132,7 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
                     useMmproj = cfg.useMmproj,
                 ),
             ),
+            localDrafters = localDrafterList(),
         )
         startTicker()
         // Real server logs replace the mock generator.
@@ -136,10 +141,14 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             LlamaServerService.status.collect { s ->
                 val stopped = s == LlamaServerService.Status.STOPPED
+                val becameRunning = lastStatus != LlamaServerService.Status.RUNNING &&
+                    s == LlamaServerService.Status.RUNNING
+                lastStatus = s
                 state = state.copy(
                     serverStatus = s,
                     running = s == LlamaServerService.Status.RUNNING || s == LlamaServerService.Status.STARTING,
                     metrics = if (stopped) state.metrics.copy(tps = 0f, pp = 0f) else state.metrics,
+                    serverEpoch = if (becameRunning) state.serverEpoch + 1 else state.serverEpoch,
                 )
                 // Model switch requested while running: restart with the new config once stopped.
                 if (stopped && pendingRestart) {
@@ -366,7 +375,7 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
         state = state.copy(hfQuery = q)
         hfSearchJob?.cancel()
         if (q.isBlank()) {
-            state = state.copy(models = localModels(state.metrics.ramFree, state.settings), hfLoading = false, hfError = null)
+            state = state.copy(models = localModels(state.metrics.ramFree, state.settings), localDrafters = localDrafterList(), hfLoading = false, hfError = null)
             return
         }
         hfSearchJob = viewModelScope.launch {
@@ -417,6 +426,7 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: Exception) {
                 state = state.copy(
                     models = localModels(state.metrics.ramFree, state.settings),
+                    localDrafters = localDrafterList(),
                     hfLoading = false,
                     hfError = "Hugging Face search failed: ${e.message}",
                 )
@@ -552,6 +562,7 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
             modelFile = next.modelFile.substringBeforeLast(".").takeUnless { it.isBlank() } ?: next.modelFile,
             settings = state.settings.copy(useDraft = next.useDraft, useMmproj = next.useMmproj),
             models = localModels(state.metrics.ramFree, state.settings),
+            localDrafters = localDrafterList(),
         )
         if (state.running) {
             LogBus.append("switching model → $file")
@@ -573,7 +584,45 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
             // Drop stale file→repo bookkeeping for the removed files.
             configRepo.save(cfg.copy(library = cfg.library - removed.toSet()))
         }
-        state = state.copy(models = localModels(state.metrics.ramFree, state.settings))
+        state = state.copy(models = localModels(state.metrics.ramFree, state.settings), localDrafters = localDrafterList())
+    }
+
+    /** Choose [draftFile] ("" = none) as the drafter for [modelFile]; auto-restart if it's the active model. */
+    fun setDrafter(modelFile: String, draftFile: String) {
+        val cfg = configRepo.load()
+        val activeChange = modelFile == cfg.modelFile
+        var next = cfg.copy(drafters = cfg.drafters + (modelFile to draftFile))
+        if (activeChange) next = next.copy(draftFile = draftFile, useDraft = draftFile.isNotBlank())
+        configRepo.save(next)
+        state = state.copy(
+            settings = if (activeChange) state.settings.copy(useDraft = next.useDraft) else state.settings,
+            models = localModels(state.metrics.ramFree, state.settings),
+            localDrafters = localDrafterList(),
+        )
+        if (activeChange && state.running) {
+            LogBus.append("drafter → ${draftFile.ifBlank { "none" }} (restarting)")
+            pendingRestart = true
+            LlamaServerService.stop(getApplication())
+        }
+    }
+
+    /** Delete a drafter file; refuse if it's the active drafter while running. */
+    fun deleteDrafter(file: String) {
+        val cfg = configRepo.load()
+        if (file == cfg.draftFile && state.running) {
+            LogBus.append("delete refused: $file is the active drafter — stop the server first")
+            return
+        }
+        if (File(configRepo.modelsDir(), file).delete()) {
+            LogBus.append("deleted drafter: $file")
+            configRepo.save(configAfterDrafterDelete(cfg, file))
+        }
+        val saved = configRepo.load()
+        state = state.copy(
+            settings = state.settings.copy(useDraft = saved.useDraft),
+            models = localModels(state.metrics.ramFree, state.settings),
+            localDrafters = localDrafterList(),
+        )
     }
 
     // ----- Helpers ----------------------------------------------------------------------------
@@ -678,6 +727,15 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
         return if (entries.none { it.state == ModelState.ACTIVE }) {
             seedModels(freeRamMB, settings) + entries
         } else entries
+    }
+
+    /** Draft files on disk, for the chooser + "Drafters on disk" list (alphabetical). */
+    private fun localDrafterList(): List<DrafterFile> {
+        val onDisk = configRepo.modelsDir().listFiles().orEmpty()
+            .filter { it.isFile }.map { it.name to it.length() }
+        return draftersOnDisk(onDisk)
+            .map { (name, bytes) -> DrafterFile(name, bytes.toFloat() / (1024f * 1024f * 1024f)) }
+            .sortedBy { it.file.lowercase() }
     }
 
     private fun warnIfSelectedModelMayNotFit() {
