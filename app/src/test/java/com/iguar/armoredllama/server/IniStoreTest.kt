@@ -86,4 +86,19 @@ class IniStoreTest {
         val restored = llamaConfigFromIni(LlamaConfig().toIni())
         assertEquals(emptyMap<String, String>(), restored.library)
     }
+
+    @Test fun drafters_roundTripThroughIni() {
+        val cfg = LlamaConfig(drafters = mapOf(
+            "HiFi.gguf" to "mtp-gemma-4-E2B-it.gguf",
+            "Qwen.gguf" to "",
+        ))
+        val back = llamaConfigFromIni(cfg.toIni())
+        assertEquals(cfg.drafters, back.drafters)
+    }
+
+    @Test fun drafters_emptyMapWritesNoSection_absentReadsEmpty() {
+        val ini = LlamaConfig().toIni()
+        assertEquals(false, ini.contains("[drafters]"))
+        assertEquals(emptyMap<String, String>(), llamaConfigFromIni(ini).drafters)
+    }
 }

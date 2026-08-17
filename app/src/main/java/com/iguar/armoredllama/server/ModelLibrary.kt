@@ -29,19 +29,48 @@ fun mmprojForRepo(library: Map<String, String>, repo: String, self: String): Str
 }
 
 /**
+ * The drafter file for [modelFile]: an explicit [LlamaConfig.drafters] choice ("" = none) wins; else
+ * the curated default's own draft for the curated model; else "". The user owns compatibility.
+ */
+fun draftForModel(cfg: LlamaConfig, modelFile: String): String {
+    cfg.drafters[modelFile]?.let { return it }
+    if (modelFile == LlamaConfig().modelFile) return LlamaConfig().draftFile
+    return ""
+}
+
+/** Filter (fileName, sizeBytes) pairs down to draft/speculative .gguf files (draft/mtp/dspark). */
+fun draftersOnDisk(files: List<Pair<String, Long>>): List<Pair<String, Long>> =
+    files.filter { (name, _) -> name.endsWith(".gguf", ignoreCase = true) && isDraftFile(name) }
+
+/**
+ * The config after deleting drafter [file] from disk: prune it from [LlamaConfig.drafters] values and
+ * from [LlamaConfig.library], and clear the active draft if [file] was in use.
+ */
+fun configAfterDrafterDelete(cfg: LlamaConfig, file: String): LlamaConfig {
+    val pruned = cfg.copy(
+        drafters = cfg.drafters.filterValues { it != file },
+        library = cfg.library - file,
+    )
+    return if (pruned.draftFile == file) pruned.copy(draftFile = "", useDraft = false) else pruned
+}
+
+/**
  * The config after switching to [file]. The curated default model restores its full profile
  * (repo + draft + mmproj from [LlamaConfig] defaults); any other file derives only its vision projector
  * from the repo recorded in [LlamaConfig.library] — arbitrary drafts stay unwired because the on-device
  * build cannot run them (custom drafters are an unknown architecture and crash the server on load).
- * Feature toggles follow the files; server settings pass through untouched.
+ * The drafter itself is resolved via [draftForModel], which honors an explicit [LlamaConfig.drafters]
+ * choice for any model (including the curated default). Feature toggles follow the files; server
+ * settings pass through untouched.
  */
 fun switchedConfig(cfg: LlamaConfig, file: String): LlamaConfig {
     val d = LlamaConfig()
+    val draft = draftForModel(cfg, file)
     val next = if (file == d.modelFile) {
-        cfg.copy(repo = d.repo, modelFile = d.modelFile, draftFile = d.draftFile, mmprojFile = d.mmprojFile)
+        cfg.copy(repo = d.repo, modelFile = d.modelFile, draftFile = draft, mmprojFile = d.mmprojFile)
     } else {
         val repo = cfg.library[file] ?: ""
-        cfg.copy(repo = repo, modelFile = file, draftFile = "", mmprojFile = mmprojForRepo(cfg.library, repo, file))
+        cfg.copy(repo = repo, modelFile = file, draftFile = draft, mmprojFile = mmprojForRepo(cfg.library, repo, file))
     }
     return next.copy(useDraft = next.draftFile.isNotBlank(), useMmproj = next.mmprojFile.isNotBlank())
 }
