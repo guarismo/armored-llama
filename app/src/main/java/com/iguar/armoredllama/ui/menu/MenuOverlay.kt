@@ -230,7 +230,7 @@ private fun DrawerRow(
 
 /** Reusable header for the full-screen sub-panels: back arrow + title. */
 @Composable
-fun PanelHeader(title: String, onBack: () -> Unit) {
+fun PanelHeader(title: String, onBack: () -> Unit, action: (@Composable () -> Unit)? = null) {
     val c = MonitorTheme.colors
     Row(
         modifier = Modifier
@@ -249,6 +249,10 @@ fun PanelHeader(title: String, onBack: () -> Unit) {
         }
         Spacer(Modifier.width(6.dp))
         Text(title, style = MonitorType.title, color = c.text)
+        if (action != null) {
+            Spacer(Modifier.weight(1f))
+            action()
+        }
     }
 }
 
