@@ -132,6 +132,7 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
                     useMmproj = cfg.useMmproj,
                 ),
             ),
+            localDrafters = localDrafterList(),
         )
         startTicker()
         // Real server logs replace the mock generator.
