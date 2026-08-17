@@ -371,7 +371,7 @@ fun HfPanel(state: MonitorUiState, onBack: () -> Unit, callbacks: MenuCallbacks)
                 if (state.hfQuery.isBlank() && state.localDrafters.isNotEmpty()) {
                     DraftersOnDisk(drafters = state.localDrafters, onDelete = callbacks.onDeleteDrafter)
                 }
-}
+            }
         }
     }
 }

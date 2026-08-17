@@ -47,10 +47,12 @@ fun draftersOnDisk(files: List<Pair<String, Long>>): List<Pair<String, Long>> =
  * from [LlamaConfig.library], and clear the active draft if [file] was in use.
  */
 fun configAfterDrafterDelete(cfg: LlamaConfig, file: String): LlamaConfig {
-    val pruned = cfg.copy(
-        drafters = cfg.drafters.filterValues { it != file },
-        library = cfg.library - file,
-    )
+    val d = LlamaConfig()
+    var drafters = cfg.drafters.filterValues { it != file }
+    // Deleting the curated model's own draft: record an explicit "none" so draftForModel can't
+    // resurrect the now-missing file via the curated fallback.
+    if (file == d.draftFile) drafters = drafters + (d.modelFile to "")
+    val pruned = cfg.copy(drafters = drafters, library = cfg.library - file)
     return if (pruned.draftFile == file) pruned.copy(draftFile = "", useDraft = false) else pruned
 }
 

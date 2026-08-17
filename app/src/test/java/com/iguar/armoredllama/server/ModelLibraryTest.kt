@@ -177,7 +177,19 @@ class ModelLibraryTest {
         val next = configAfterDrafterDelete(cfg, "mtp-gemma-4-E2B-it.gguf")
         assertEquals("", next.draftFile)                                   // active draft cleared
         assertEquals(false, next.useDraft)
-        assertEquals(mapOf("Qwen.gguf" to ""), next.drafters)              // HiFi→mtp mapping pruned
+        // HiFi→mtp mapping pruned; curated model gets an explicit "none" since the deleted file was its
+        // own draft (mtp-gemma-4-E2B-it.gguf is LlamaConfig()'s default draftFile).
+        assertEquals(mapOf("Qwen.gguf" to "", LlamaConfig().modelFile to ""), next.drafters)
         assertEquals(mapOf("HiFi.gguf" to "repo2"), next.library)          // library entry pruned
+    }
+
+    @Test fun configAfterDrafterDelete_suppressesCuratedFallbackWhenCuratedDraftDeleted() {
+        val d = LlamaConfig()  // curated defaults: draftFile = the curated MTP draft, no [drafters] entries
+        val next = configAfterDrafterDelete(d, d.draftFile)
+        // curated model is now explicitly "none" — the fallback can't re-derive the deleted file
+        assertEquals("", next.drafters[d.modelFile])
+        assertEquals("", draftForModel(next, d.modelFile))
+        assertEquals("", next.draftFile)
+        assertEquals(false, next.useDraft)
     }
 }
